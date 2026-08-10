@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.cache/
+build/
+dist/
+updater/build/
+updater/dist/
+*.spec.bak
+.NorrathIQ-staged/
+.norrathiq-backups/

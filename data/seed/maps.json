@@ -1,0 +1,16 @@
+{
+  "zones": {
+    "Blackburrow": {
+      "note": "Known source zone; no trustworthy exact pin is available in the seed pack."
+    },
+    "Qeynos Hills": {
+      "note": "Generated coordinate grid; the gnoll hunter route is approximate."
+    },
+    "South Qeynos": {
+      "note": "Generated coordinate grid; exact realm calibration not installed."
+    },
+    "Surefall Glade": {
+      "note": "Generated coordinate grid; exact realm calibration not installed."
+    }
+  }
+}

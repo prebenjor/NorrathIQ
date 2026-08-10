@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=75,<76", "wheel>=0.45,<1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "norrathiq-updater"
+version = "1.3.0"
+description = "Build, validate, update, and install NorrathIQ knowledge packs."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+norrathiq = "norrathiq.cli:main"
+norrathiq-gui = "norrathiq.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["norrathiq*"]
+
+[tool.pytest.ini_options]
+testpaths = ["../tests"]
+pythonpath = ["."]

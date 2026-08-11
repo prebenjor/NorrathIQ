@@ -735,7 +735,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.5") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.6") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")

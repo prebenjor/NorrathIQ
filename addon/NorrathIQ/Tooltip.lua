@@ -105,7 +105,7 @@ function Tooltip:Decorate(tooltip)
     end, 4)
     local recommendation = NIQ.Recommendation:Evaluate(entity)
     local color = colors[recommendation.action] or colors.REVIEW
-    tooltip:AddLine("Recommendation: " .. recommendation.action, color[1], color[2], color[3])
+    tooltip:AddLine("Inventory guidance: " .. recommendation.action, color[1], color[2], color[3])
     tooltip:AddLine(recommendation.reason, 0.82, 0.82, 0.82, true)
     local comparison = NIQ.Recommendation:CompareEquipped(entity)
     if comparison then

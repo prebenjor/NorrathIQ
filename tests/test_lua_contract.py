@@ -77,6 +77,11 @@ class LuaContractTests(unittest.TestCase):
         recommendation = (ADDON / "Recommendation.lua").read_text(encoding="utf-8")
         self.assertNotIn("DeleteCursorItem", recommendation)
         self.assertNotIn("UseContainerItem", recommendation)
+        self.assertIn('hasEntries(entity.quests)', recommendation)
+        self.assertIn('hasEntries(entity.turnins)', recommendation)
+        self.assertIn('entity.verifiedNoUse == true', recommendation)
+        self.assertIn('entity._detail', recommendation)
+        self.assertNotIn('vendorValue > 0 and not entity.related', recommendation)
         self.assertFalse((ADDON / "Capture.lua").exists())
 
     def test_search_is_offline_and_minimap_button_toggles_browser(self) -> None:

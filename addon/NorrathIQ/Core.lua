@@ -4,7 +4,7 @@ NorrathIQ = NorrathIQ or {}
 local NIQ = NorrathIQ
 
 NIQ.name = ADDON_NAME or "NorrathIQ"
-NIQ.version = "1.3.5"
+NIQ.version = "1.3.6"
 NIQ.schemaVersion = 1
 NIQ.modules = NIQ.modules or {}
 NIQ.moduleOrder = NIQ.moduleOrder or {}

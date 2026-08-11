@@ -510,7 +510,7 @@ function UI:ShowEntity(entity)
     end
     local recommendation = NIQ.Recommendation:Evaluate(entity)
     table.insert(lines, "")
-    table.insert(lines, "|cffffd100Recommendation:|r " .. recommendation.action)
+    table.insert(lines, "|cffffd100Inventory guidance:|r " .. recommendation.action)
     table.insert(lines, recommendation.reason)
     local comparison = NIQ.Recommendation:CompareEquipped(entity)
     if comparison then

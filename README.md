@@ -39,7 +39,7 @@ Default paths use the current Windows home directory. Packagers can override the
 - Hover an item to show knowledge already loaded for it. Hovering never queues or loads database shards.
 - Click **Source Map**, **Turn-in**, **Related**, **Recipe**, or **Database URL** on a selected record when available.
 
-Recommendations are conservative: keys and active quest items win; known research and tradeskill uses remain Keep; `$` requires no retained use; Destroy requires zero value, no known use, and strong evidence.
+Inventory guidance is deliberately conservative: keys, quests, recipes, research, and tradeskill relations block discard advice. `$`, Vendor, and Destroy require a full record explicitly marked `verifiedNoUse`; a vendor price alone is never enough.
 
 ## Commands
 
@@ -92,7 +92,7 @@ Press Enter after typing the command, confirm NorrathIQ is enabled, and enable *
 
 ### Hovering loads data or reduces FPS
 
-Version 1.3.5 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
+Version 1.3.6 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
 
 ### A staged update is not active
 
@@ -139,7 +139,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua).
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.5
+.\scripts\package-release.ps1 -Version 1.3.6
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

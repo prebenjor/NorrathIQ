@@ -160,7 +160,7 @@ class UpdaterApp(tk.Tk):
         ttk.Label(eqwow, text="Unverified HTTP source: fingerprints detect changes but cannot prove who sent them.", foreground="#9a5b18").grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 8))
         ttk.Button(eqwow, text="Check now", command=self._check_eqwow).grid(row=2, column=0, padx=(0, 6))
         ttk.Button(eqwow, text="Review changes", command=self._review_eqwow).grid(row=2, column=1, padx=6)
-        self.crawl_button = ttk.Button(eqwow, text="Continue detail download", command=self._continue_eqwow)
+        self.crawl_button = ttk.Button(eqwow, text="Complete all database details", command=self._continue_eqwow)
         self.crawl_button.grid(row=2, column=2, padx=6)
         ttk.Button(eqwow, text="Apply validated update", command=self._apply_eqwow).grid(row=2, column=3, padx=6)
 
@@ -264,7 +264,7 @@ class UpdaterApp(tk.Tk):
                     self.operation_running = False
                     self.crawl_running = False
                     if hasattr(self, "crawl_button"):
-                        self.crawl_button.configure(text="Continue detail download")
+                        self.crawl_button.configure(text="Complete all database details")
                     text = getattr(value, "message", None) or str(value)
                     self.status.set(text)
                     self._append(text)
@@ -273,7 +273,7 @@ class UpdaterApp(tk.Tk):
                     self.operation_running = False
                     self.crawl_running = False
                     if hasattr(self, "crawl_button"):
-                        self.crawl_button.configure(text="Continue detail download")
+                        self.crawl_button.configure(text="Complete all database details")
                     self.status.set(f"Failed: {value}")
                     self._append(f"ERROR: {value}")
                     messagebox.showerror("NorrathIQ updater", str(value))
@@ -304,10 +304,13 @@ class UpdaterApp(tk.Tk):
             )
             if value.total and value.detailed < value.total:
                 state += " — Detail crawl incomplete"
+            remaining = max(0, value.total - value.detailed)
+            minimum_hours = remaining / 3600
             self.eqwow_status.set(
                 f"{state}. Installed: {value.active_snapshot or 'none'}; candidate: {value.candidate_snapshot or 'none'}; "
                 f"indexing: {value.indexing_snapshot or 'idle'}; last check: {value.checked_at or 'never'}; "
-                f"{counts}; details {value.detailed:,}/{value.total:,}."
+                f"{counts}; details {value.detailed:,}/{value.total:,}; "
+                f"minimum remaining time at the safe source rate: {minimum_hours:.1f} hours."
             )
         except (OSError, ValueError, sqlite3.Error) as exc:
             self.eqwow_status.set(f"Source cache needs attention: {exc}")
@@ -371,6 +374,14 @@ class UpdaterApp(tk.Tk):
         self.crawl_button.configure(text="Pause after current record")
 
         def operation() -> str:
+            reported = 0
+
+            def report(message: str) -> None:
+                nonlocal reported
+                reported += 1
+                if reported == 1 or reported % 25 == 0:
+                    self.events.put(("log", message + f" ({reported:,} processed this run)"))
+
             priority = [("item", 95750), ("npc", 45603), ("spell", 86901), ("spell", 8921)]
             capture_file = find_capture_file(self.wow_path.get())
             if capture_file:
@@ -386,11 +397,11 @@ class UpdaterApp(tk.Tk):
             with EqwowCache(self._eqwow_cache_path()) as cache:
                 downloaded, remaining = EqwowSource(cache).crawl(
                     priority=priority,
-                    progress=lambda message: self.events.put(("log", message)),
+                    progress=report,
                     should_pause=self.crawl_pause.is_set,
                 )
             return f"Downloaded {downloaded:,} EQWOW detail records; {remaining:,} remain. Progress is saved and resumes here."
-        self._run("Continuing the resumable EQWOW detail download...", operation)
+        self._run("Completing all EQWOW details. NPC locations are prioritized; progress is checkpointed...", operation)
 
     def _apply_eqwow(self) -> None:
         try:

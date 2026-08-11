@@ -139,6 +139,55 @@ def test_targeted_item_crawl_follows_drop_npc_and_compiles_map_marker(tmp_path):
     assert packed["spawns"][packed_drop["marker"]]["x"] == 0.426
 
 
+def test_lightweight_indexes_compile_sources_and_locations_without_details(tmp_path):
+    with EqwowCache(tmp_path / "index-facts.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "zone", [
+            {"kind": "zone", "id": 5146, "name": "Guk", "fields": {"id": 5146}},
+        ])
+        cache.put_indexes(snapshot, "npc", [
+            {"kind": "npc", "id": 50423, "name": "the froglok shin lord", "fields": {
+                "id": 50423, "minlevel": 30, "maxlevel": 30, "location": [5146],
+            }},
+        ])
+        cache.put_indexes(snapshot, "quest", [
+            {"kind": "quest", "id": 31617, "name": "Corrupted Ghoulbane", "fields": {"id": 31617, "category": 5146}},
+        ])
+        cache.put_indexes(snapshot, "spell", [
+            {"kind": "spell", "id": 90705, "name": "Create Ghoulbane", "fields": {"id": 90705}},
+        ])
+        cache.put_indexes(snapshot, "item", [
+            {"kind": "item", "id": 88751, "name": "Ghoulbane", "fields": {
+                "id": 88751, "source": [1, 2, 4], "sourcemore": [
+                    {"n": "the froglok shin lord", "t": 1, "ti": 50423, "z": 5146},
+                    {"n": "Corrupted Ghoulbane", "t": 5, "ti": 31617, "z": 5146},
+                    {"n": "Create Ghoulbane", "t": 6, "ti": 90705},
+                ],
+            }},
+        ])
+        cache.finish_index(snapshot)
+        bundle = build_bundle_from_cache(cache)
+
+    assert bundle.entities["eqwow:npc:50423"]["zone"] == "Guk"
+    assert bundle.entities["eqwow:item:88751"]["sourceZones"] == ["Guk"]
+    relations = {(edge["from"], edge["relation"], edge["to"]) for edge in bundle.edges}
+    assert ("eqwow:item:88751", "DROPPED_BY", "eqwow:npc:50423") in relations
+    assert ("eqwow:quest:31617", "QUEST_REWARD", "eqwow:item:88751") in relations
+    assert ("eqwow:item:88751", "CRAFTED_BY", "eqwow:spell:90705") in relations
+
+
+def test_full_detail_queue_prioritizes_npcs_and_uses_compact_rows(tmp_path):
+    with EqwowCache(tmp_path / "pending.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "item", [{"kind": "item", "id": 1, "name": "Item", "fields": {"id": 1, "large": "x" * 1000}}])
+        cache.put_indexes(snapshot, "npc", [{"kind": "npc", "id": 2, "name": "NPC", "fields": {"id": 2}}])
+        cache.finish_index(snapshot)
+        rows = cache.pending(snapshot)
+        assert [(row["kind"], row["record_id"]) for row in rows] == [("npc", 2), ("item", 1)]
+        assert "index_json" not in rows[0].keys()
+        assert cache.pending_count(snapshot) == 2
+
+
 def test_custom_bind_and_moonfire_are_wow_namespaced():
     bind = parse_detail_page("spell", 86901, detail_page(
         "spell", 86901, "Bind Affinity (Self)",

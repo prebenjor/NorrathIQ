@@ -469,25 +469,40 @@ class EqwowCache:
         seen: set[tuple[str, int]] = set()
         for kind, record_id in priority or []:
             row = self.db.execute(
-                "SELECT * FROM records WHERE snapshot_id=? AND kind=? AND record_id=? AND detail_verified=0",
+                "SELECT kind,record_id,name FROM records WHERE snapshot_id=? AND kind=? AND record_id=? AND detail_verified=0",
                 (snapshot_id, kind, int(record_id)),
             ).fetchone()
             if row:
                 rows.append(row)
                 seen.add((kind, int(record_id)))
         for row in self.db.execute(
-            "SELECT * FROM records WHERE snapshot_id=? AND detail_verified=0 ORDER BY kind,record_id", (snapshot_id,)
+            """SELECT kind,record_id,name FROM records WHERE snapshot_id=? AND detail_verified=0
+               ORDER BY CASE kind
+                   WHEN 'npc' THEN 0 WHEN 'item' THEN 1 WHEN 'quest' THEN 2
+                   WHEN 'object' THEN 3 WHEN 'spell' THEN 4 WHEN 'zone' THEN 5 ELSE 6 END,
+                   record_id""",
+            (snapshot_id,),
         ):
             key = (str(row["kind"]), int(row["record_id"]))
             if key not in seen:
                 rows.append(row)
         return rows
 
+    def pending_count(self, snapshot_id: str) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM records WHERE snapshot_id=? AND detail_verified=0",
+            (snapshot_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def status(self) -> SourceStatus:
         candidate = self.get_meta("candidate_snapshot")
         active = self.get_meta("active_snapshot")
         indexing = self.get_meta("indexing_snapshot")
-        selected = indexing or candidate or active
+        # A resumable index check can coexist with the last complete candidate.
+        # Report usable detail coverage for that complete snapshot, while exposing
+        # the in-progress snapshot separately through indexing_snapshot.
+        selected = candidate or active or indexing
         counts: dict[str, int] = {}
         detailed = total = 0
         warnings: list[str] = []
@@ -691,7 +706,7 @@ class EqwowSource:
             detail = parse_detail_page(kind, record_id, text)
             self.cache.put_detail(snapshot, detail)
             completed += 1
-        remaining = len(self.cache.pending(snapshot))
+        remaining = self.cache.pending_count(snapshot)
         return completed, remaining
 
     def crawl_targets(
@@ -806,7 +821,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.2") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.3") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")
@@ -848,10 +863,12 @@ def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *
                 rows.append(row)
                 removed_keys.add(key)
     details: dict[tuple[str, int], dict[str, Any]] = {}
+    indexes: dict[tuple[str, int], dict[str, Any]] = {}
     for row in rows:
         index = json.loads(row["index_json"])
         detail = json.loads(row["detail_json"]) if row["detail_json"] else None
         kind, record_id = str(row["kind"]), int(row["record_id"])
+        indexes[(kind, record_id)] = index
         fields = index.get("fields", {})
         entity: dict[str, Any] = {
             "id": _entity_id(kind, record_id), "type": kind, "name": row["name"],
@@ -879,6 +896,7 @@ def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *
                 entity["fieldOrigins"]["summary"] = SOURCE_ID
             _enrich_detail_fields(entity, detail)
         bundle.entities[entity["id"]] = entity
+    _build_index_facts(bundle, indexes, snapshot, snap["checked_at"])
     _build_relations(bundle, details, snapshot, snap["checked_at"])
     return bundle
 
@@ -935,11 +953,120 @@ def _ensure_entity(bundle: KnowledgeBundle, kind: str, raw: dict[str, Any], snap
 
 def _edge(bundle: KnowledgeBundle, source: str, relation: str, target: str, provenance: dict[str, Any], **extra: Any) -> None:
     key = (source, relation, target)
-    if any((edge.get("from"), edge.get("relation"), edge.get("to")) == key for edge in bundle.edges):
+    edge_index = getattr(bundle, "_eqwow_edge_index", None)
+    if edge_index is None:
+        edge_index = {(edge.get("from"), edge.get("relation"), edge.get("to")): edge for edge in bundle.edges}
+        setattr(bundle, "_eqwow_edge_index", edge_index)
+    existing = edge_index.get(key)
+    if existing:
+        for field, value in extra.items():
+            if value is not None and (field not in existing or existing.get(field) is None):
+                existing[field] = value
         return
     record = {"id": f"eqwow-edge:{len(bundle.edges) + 1}", "from": source, "relation": relation, "to": target, "source": provenance, "confidence": "high"}
     record.update({key: value for key, value in extra.items() if value is not None})
     bundle.edges.append(record)
+    edge_index[key] = record
+
+
+def _zone_context(bundle: KnowledgeBundle, raw_zone_id: Any) -> tuple[int | None, str | None]:
+    try:
+        zone_id = int(raw_zone_id)
+    except (TypeError, ValueError):
+        return None, None
+    zone = bundle.entities.get(_entity_id("zone", zone_id), {})
+    name = sanitize_text(zone.get("name"))
+    return zone_id, name if name and name.casefold() != "undefined" else None
+
+
+def _add_source_zone(entity: dict[str, Any], zone_name: str | None) -> None:
+    if not zone_name:
+        return
+    zones = entity.setdefault("sourceZones", [])
+    if zone_name not in zones:
+        zones.append(zone_name)
+
+
+def _build_index_facts(
+    bundle: KnowledgeBundle,
+    indexes: dict[tuple[str, int], dict[str, Any]],
+    snapshot: str,
+    checked_at: str,
+) -> None:
+    """Compile acquisition and location facts already present in list indexes.
+
+    This gives the complete snapshot useful baseline coverage without waiting for
+    roughly two days of rate-limited detail requests. Detail pages later add exact
+    chances, quest prose, recipes, and map coordinates over the same edge keys.
+    """
+    for (kind, record_id), index in indexes.items():
+        entity = bundle.entities.get(_entity_id(kind, record_id))
+        if not entity:
+            continue
+        fields = index.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+        locations = fields.get("location") or []
+        if not isinstance(locations, list):
+            locations = [locations]
+        if kind == "quest" and not locations and fields.get("category") is not None:
+            locations = [fields.get("category")]
+        location_ids: list[int] = []
+        for raw_zone_id in locations:
+            zone_id, zone_name = _zone_context(bundle, raw_zone_id)
+            if zone_id is None:
+                continue
+            location_ids.append(zone_id)
+            _add_source_zone(entity, zone_name)
+        if location_ids:
+            entity["zoneIds"] = list(dict.fromkeys(location_ids))
+            entity["zoneId"] = location_ids[0]
+            if entity.get("sourceZones"):
+                entity["zone"] = entity["sourceZones"][0]
+
+        if kind != "item":
+            continue
+        source_codes = set()
+        for value in fields.get("source") or []:
+            try:
+                source_codes.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        provenance = entity["source"]
+        for raw in fields.get("sourcemore") or []:
+            if not isinstance(raw, dict):
+                continue
+            zone_id, zone_name = _zone_context(bundle, raw.get("z"))
+            _add_source_zone(entity, zone_name)
+            try:
+                target_type = int(raw.get("t"))
+                target_id = int(raw.get("ti"))
+            except (TypeError, ValueError):
+                continue
+            raw_target = {"id": target_id, "name": raw.get("n")}
+            if target_type == 1:
+                target = _ensure_entity(bundle, "npc", raw_target, snapshot, checked_at)
+                if not target:
+                    continue
+                if 2 in source_codes:
+                    _edge(bundle, entity["id"], "DROPPED_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+                if 5 in source_codes:
+                    _edge(bundle, entity["id"], "SOLD_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+            elif target_type in {2, 3} and 2 in source_codes:
+                target_kind = "object" if target_type == 2 else "item"
+                target = _ensure_entity(bundle, target_kind, raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, entity["id"], "DROPPED_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name, container=True)
+            elif target_type == 5 and 4 in source_codes:
+                target = _ensure_entity(bundle, "quest", raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, target, "QUEST_REWARD", entity["id"], provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+            elif target_type == 6 and 1 in source_codes:
+                target = _ensure_entity(bundle, "spell", raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, entity["id"], "CRAFTED_BY", target, provenance, confidence="medium")
+        if len(entity.get("sourceZones", [])) == 1 and not entity.get("zone"):
+            entity["zone"] = entity["sourceZones"][0]
 
 
 def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dict[str, Any]], snapshot: str, checked_at: str) -> None:

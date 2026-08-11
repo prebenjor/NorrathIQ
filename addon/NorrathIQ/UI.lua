@@ -495,6 +495,11 @@ function UI:ShowEntity(entity)
             table.insert(lines, "  - " .. drop.npc .. " - " .. (drop.zone or "unknown") .. (level and " (level " .. level .. ")" or "") .. chance)
         end
     end
+    if entity.sourceZones and #entity.sourceZones > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "|cffffd100Known source zones|r")
+        for _, zone in ipairs(entity.sourceZones) do table.insert(lines, "  - " .. tostring(zone)) end
+    end
     local relations = NIQ.Data:GetRelations(entity, false)
     if #relations > 0 then
         table.insert(lines, "")

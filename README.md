@@ -136,7 +136,7 @@ The [EQWOW Database](http://50.6.248.85/dbviewer/) supplies realm IDs, fusion sp
 
 1. **Check now** compares lightweight indexes.
 2. **Review changes** shows entity and field changes.
-3. **Continue detail download** resumes the checkpointed crawl.
+3. **Complete all database details** resumes the checkpointed crawl. NPCs are downloaded first so drop zones and exact pins become useful before slower item, quest, object, spell, and zone enrichment. The source permits only one request per second, so a complete first crawl takes at least roughly 54 hours and can be paused safely.
 4. **Apply validated update** compiles and installs the reviewed candidate.
 
 The site is HTTP-only. Requests are restricted to `50.6.248.85/dbviewer/`; redirects, response sizes, parsing, and fingerprints are validated. Fingerprints detect changes but cannot authenticate HTTP transport.
@@ -268,7 +268,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua) for current signatures.
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.2
+.\scripts\package-release.ps1 -Version 1.3.3
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

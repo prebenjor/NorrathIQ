@@ -106,6 +106,7 @@ function Tooltip:Decorate(tooltip)
         end
         return drop.npc .. level .. " — " .. (drop.zone or "unknown zone") .. observed
     end)
+    addList(tooltip, "Known source zones", entity.sourceZones, function(zone) return tostring(zone) end)
     addList(tooltip, "Related", NIQ.Data:GetRelations(entity, false), function(related)
         return related.name .. " [" .. related.type .. "]"
     end, 4)

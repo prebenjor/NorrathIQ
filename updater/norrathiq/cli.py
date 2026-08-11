@@ -71,6 +71,11 @@ def parser() -> argparse.ArgumentParser:
     crawl_source.add_argument("--limit", type=int, help="Stop after this many detail records")
     crawl_source.add_argument("--priority", action="append", default=[], help="Fetch kind:id before the normal queue")
 
+    crawl_zone = commands.add_parser("crawl-zone", help="Download a zone and its listed NPC/object map details")
+    crawl_zone.add_argument("zone_id", type=int)
+    crawl_zone.add_argument("--cache", type=Path, default=Path(".cache/eqwow.sqlite3"))
+    crawl_zone.add_argument("--limit", type=int, default=120)
+
     review_update = commands.add_parser("review-update", help="Review field-level EQWOW snapshot changes")
     review_update.add_argument("--cache", type=Path, default=Path(".cache/eqwow.sqlite3"))
     review_update.add_argument("--limit", type=int, default=200)
@@ -183,6 +188,16 @@ def main(argv: list[str] | None = None) -> int:
             with EqwowCache(arguments.cache) as cache:
                 completed, remaining = EqwowSource(cache).crawl(limit=arguments.limit, priority=priority, progress=print)
             print(f"Downloaded {completed:,} details; {remaining:,} remain. Re-run to resume.")
+            return 0
+        if arguments.command == "crawl-zone":
+            with EqwowCache(arguments.cache) as cache:
+                downloaded, targets, remaining = EqwowSource(cache).crawl_zone(
+                    arguments.zone_id, max_records=arguments.limit, progress=print,
+                )
+            print(
+                f"Zone {arguments.zone_id}: downloaded {downloaded:,} detail pages for "
+                f"{targets:,} listed NPC/object records; {remaining:,} remain for this zone."
+            )
             return 0
         if arguments.command == "review-update":
             with EqwowCache(arguments.cache) as cache:

@@ -60,7 +60,8 @@ The [EQWOW Database](http://50.6.248.85/dbviewer/) is the primary source for rea
 1. **Check now** compares source indexes.
 2. **Review changes** shows added, changed, and missing records.
 3. **Complete all database details** resumes the checkpointed detail crawl. NPCs are prioritized. The source allows one request per second, so a complete first crawl takes roughly 54 hours and can be paused safely.
-4. **Apply validated update** compiles and installs the reviewed snapshot.
+4. **Download one zone map** accepts an EQWOW zone ID and fetches that zone's listed NPC/object coordinate pages without waiting for the complete crawl.
+5. **Apply validated update** compiles and installs the reviewed snapshot.
 
 The database is HTTP-only. Requests are restricted to `50.6.248.85/dbviewer/`; redirects, response sizes, parsing, and fingerprints are validated. Fingerprints detect changes but cannot authenticate the server.
 
@@ -92,7 +93,7 @@ Press Enter after typing the command, confirm NorrathIQ is enabled, and enable *
 
 ### Hovering loads data or reduces FPS
 
-Version 1.3.6 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
+Version 1.3.7 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
 
 ### A staged update is not active
 
@@ -114,6 +115,7 @@ python -m updater.norrathiq.cli gui
 python -m updater.norrathiq.cli check-source --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli source-status --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli crawl-source --cache .cache\eqwow.sqlite3
+python -m updater.norrathiq.cli crawl-zone 5218 --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli review-update --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli apply-update "C:\Games\WoW\Interface\AddOns" --cache .cache\eqwow.sqlite3 --confirm
 ```
@@ -139,7 +141,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua).
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.6
+.\scripts\package-release.ps1 -Version 1.3.7
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

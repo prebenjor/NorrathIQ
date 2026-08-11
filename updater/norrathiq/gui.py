@@ -8,7 +8,7 @@ import threading
 import tkinter as tk
 from datetime import datetime, timezone
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Callable
 
 PREFERRED_RELEASE_SOURCE = Path(os.environ.get(
@@ -148,6 +148,8 @@ class UpdaterApp(tk.Tk):
         self.crawl_button = ttk.Button(eqwow, text="Complete all database details", command=self._continue_eqwow)
         self.crawl_button.grid(row=2, column=2, padx=6)
         ttk.Button(eqwow, text="Apply validated update", command=self._apply_eqwow).grid(row=2, column=3, padx=6)
+        ttk.Button(eqwow, text="Download one zone map", command=self._download_zone).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(eqwow, text="Enter an EQWOW zone ID, then Apply validated update when it finishes.").grid(row=3, column=1, columnspan=3, sticky="e", pady=(8, 0))
 
         p99_card = ttk.LabelFrame(normal, text="Project 1999 Wiki — OPTIONAL REFERENCE", padding=10)
         p99_card.grid(row=2, column=0, columnspan=2, sticky="ew")
@@ -354,6 +356,28 @@ class UpdaterApp(tk.Tk):
                 )
             return f"Downloaded {downloaded:,} EQWOW detail records; {remaining:,} remain. Progress is saved and resumes here."
         self._run("Completing all EQWOW details. NPC locations are prioritized; progress is checkpointed...", operation)
+
+    def _download_zone(self) -> None:
+        zone_id = simpledialog.askinteger(
+            "Download EQWOW zone map",
+            "EQWOW zone ID (for example, 5218 for Estate of Unrest):",
+            parent=self, minvalue=1,
+        )
+        if zone_id is None:
+            return
+
+        def operation() -> str:
+            with EqwowCache(self._eqwow_cache_path()) as cache:
+                downloaded, targets, remaining = EqwowSource(cache).crawl_zone(
+                    zone_id,
+                    progress=lambda message: self.events.put(("log", message)),
+                )
+            return (
+                f"Zone {zone_id}: downloaded {downloaded:,} detail pages for {targets:,} listed NPC/object records; "
+                f"{remaining:,} remain. Click Apply validated update to install the improved map."
+            )
+
+        self._run(f"Downloading zone {zone_id} and its exact NPC/object locations...", operation)
 
     def _apply_eqwow(self) -> None:
         try:

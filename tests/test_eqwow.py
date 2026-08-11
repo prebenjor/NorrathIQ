@@ -141,6 +141,65 @@ def test_item_and_drop_npc_details_compile_map_marker(tmp_path):
     assert packed["spawns"][packed_drop["marker"]]["x"] == 0.426
 
 
+def test_zone_page_links_members_and_compiles_available_pins(tmp_path):
+    zone_html = detail_page("zone", 5218, "Estate of Unrest", views=(
+        {"template": "npc", "id": "npcs", "data": [
+            {"id": 50319, "name": "Garanel Rucksif", "location": [5218], "minlevel": 35, "maxlevel": 35},
+        ]},
+        {"template": "object", "id": "objects", "data": [
+            {"id": 274571, "name": "a dusty old backbone", "location": [5218]},
+        ]},
+        {"template": "quest", "id": "quests", "data": [
+            {"id": 32406, "name": "Khrix_Fritchoff Quest", "category": 5218},
+        ]},
+    ))
+    npc_html = detail_page("npc", 50319, "Garanel Rucksif", mapper={
+        "5218": [{"coords": [[52.1, 44.8, {}]], "count": 1}],
+    })
+    object_html = detail_page("object", 274571, "a dusty old backbone", mapper={
+        "5218": [{"coords": [[31.2, 68.4, {}]], "count": 1}],
+    })
+    quest_html = detail_page("quest", 32406, "Khrix_Fritchoff Quest")
+
+    class FakeClient:
+        def get(self, url):
+            for query, html in (
+                ("?zone=5218", zone_html), ("?npc=50319", npc_html),
+                ("?object=274571", object_html), ("?quest=32406", quest_html),
+            ):
+                if query in url:
+                    return html, {}
+            raise AssertionError(url)
+
+    with EqwowCache(tmp_path / "zone.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        for kind, record_id, name in (
+            ("zone", 5218, "Estate of Unrest"), ("npc", 50319, "Garanel Rucksif"),
+            ("object", 274571, "a dusty old backbone"), ("quest", 32406, "Khrix_Fritchoff Quest"),
+        ):
+            cache.put_indexes(snapshot, kind, [{"kind": kind, "id": record_id, "name": name, "fields": {"id": record_id}}])
+        cache.finish_index(snapshot)
+        downloaded, targets, zone_remaining = EqwowSource(cache, FakeClient()).crawl_zone(5218)
+        # Quest details are not required for zone mapping; membership comes from the zone page.
+        bundle = build_bundle_from_cache(cache)
+
+    assert (downloaded, targets, zone_remaining) == (3, 2, 0)
+    located = {
+        edge["from"] for edge in bundle.edges
+        if edge["relation"] == "LOCATED_IN" and edge["to"] == "eqwow:zone:5218"
+    }
+    assert located == {"eqwow:npc:50319", "eqwow:object:274571", "eqwow:quest:32406"}
+    assert {spawn["entity"] for spawn in bundle.spawns} == {"eqwow:npc:50319", "eqwow:object:274571"}
+    from updater.norrathiq.compiler import bundle_to_pack
+    packed = bundle_to_pack(bundle)
+    zone = packed["entities"]["eqwow:zone:5218"]
+    assert set(zone["contents"]) == located
+    assert bundle.maps["zones"]["Estate of Unrest"]["memberCount"] == 3
+    assert bundle.maps["zones"]["Estate of Unrest"]["pinCount"] == 2
+    assert packed["zones"]["Estate of Unrest"]["memberCount"] == 3
+    assert packed["zones"]["Estate of Unrest"]["zoneId"] == 5218
+
+
 def test_lightweight_indexes_compile_sources_and_locations_without_details(tmp_path):
     with EqwowCache(tmp_path / "index-facts.sqlite3") as cache:
         snapshot = cache.new_snapshot()

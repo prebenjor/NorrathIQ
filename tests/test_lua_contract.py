@@ -162,6 +162,9 @@ class LuaContractTests(unittest.TestCase):
         self.assertIn("makeInset(detailPane, false)", ui)
         self.assertIn("detail:SetTextColor(0.94, 0.91, 0.84)", ui)
         self.assertNotIn("|cff2b1b0e", ui)
+        map_lua = (ADDON / "Map.lua").read_text(encoding="utf-8")
+        self.assertIn("for markerId, spawn in pairs(NIQ.Data.spawns or {})", map_lua)
+        self.assertIn("exact pin(s) currently downloaded", map_lua)
 
 
 if __name__ == "__main__":

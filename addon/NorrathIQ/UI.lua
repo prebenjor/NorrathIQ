@@ -506,7 +506,13 @@ function UI:ShowEntity(entity)
     if #relations > 0 then
         table.insert(lines, "")
         table.insert(lines, "|cffffd100Related|r")
-        for _, relation in ipairs(relations) do table.insert(lines, "  - " .. relation.name .. " [" .. relation.type .. "]") end
+        for index, relation in ipairs(relations) do
+            if index > 40 then
+                table.insert(lines, "  +" .. tostring(#relations - 40) .. " more linked records")
+                break
+            end
+            table.insert(lines, "  - " .. relation.name .. " [" .. relation.type .. "]")
+        end
     end
     local recommendation = NIQ.Recommendation:Evaluate(entity)
     table.insert(lines, "")

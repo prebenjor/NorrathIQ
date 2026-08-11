@@ -111,7 +111,7 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
         if not source:
             continue
         key = {
-            "DROPPED_BY": "drops", "QUEST_INPUT": "quests", "TURN_IN_TO": "turnins",
+            "DROPPED_BY": "drops", "LOCATED_IN": "locations", "QUEST_INPUT": "quests", "TURN_IN_TO": "turnins",
             "RECIPE_INPUT": "components", "CRAFTED_BY": "recipes",
             "COMPANION_ITEM": "related", "RELATED_TO": "related",
             "KEY_STEP": "related", "QUEST_REWARD": "rewards",
@@ -139,13 +139,26 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
             target.setdefault("related", []).append(edge.get("from"))
         elif target and relation == "QUEST_REWARD":
             target.setdefault("quests", []).append(edge.get("from"))
+        elif target and relation == "LOCATED_IN":
+            target.setdefault("contents", []).append(edge.get("from"))
         elif target and relation in {"COMPANION_ITEM", "RELATED_TO", "KEY_STEP"}:
             target.setdefault("related", []).append(edge.get("from"))
     for entity in entities.values():
-        for key in ("aliases", "quests", "turnins", "recipes", "components", "related", "rewards", "vendors", "trainers", "givers", "relations"):
+        for key in ("aliases", "quests", "turnins", "recipes", "components", "related", "rewards", "vendors", "trainers", "givers", "locations", "contents", "relations"):
             if key in entity:
                 entity[key] = list(dict.fromkeys(entity[key]))
-    zones = bundle.maps.get("zones", bundle.maps) if isinstance(bundle.maps, dict) else {}
+    zones = dict(bundle.maps.get("zones", bundle.maps)) if isinstance(bundle.maps, dict) else {}
+    for entity in entities.values():
+        if entity.get("type") != "zone" or not entity.get("name"):
+            continue
+        members = entity.get("contents", [])
+        zone_data = zones.setdefault(entity["name"], {})
+        zone_data["zoneId"] = entity.get("realmId") or entity.get("clientId")
+        zone_data["memberCount"] = len(members)
+        zone_data["note"] = (
+            f"EQWOW zone {zone_data['zoneId']} links {len(members):,} records. "
+            "Exact pins are shown where NPC or object detail pages provide coordinates."
+        )
     return {
         "meta": {
             "id": bundle.manifest["id"],

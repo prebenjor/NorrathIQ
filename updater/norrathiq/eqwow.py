@@ -708,6 +708,67 @@ class EqwowSource:
         remaining = self.cache.pending_count(snapshot)
         return completed, remaining
 
+    def crawl_zone(
+        self,
+        zone_id: int,
+        *,
+        snapshot_id: str | None = None,
+        max_records: int = 120,
+        progress: Callable[[str], None] | None = None,
+        should_pause: Callable[[], bool] | None = None,
+    ) -> tuple[int, int, int]:
+        """Download one zone page and its listed NPC/object detail pages."""
+        snapshot = snapshot_id or self.cache.get_meta("candidate_snapshot") or self.cache.get_meta("active_snapshot")
+        if not snapshot:
+            raise ValueError("No EQWOW index exists. Run Check now first.")
+        zone_id = int(zone_id)
+        row = self.cache.db.execute(
+            "SELECT detail_verified,detail_json,name FROM records WHERE snapshot_id=? AND kind='zone' AND record_id=?",
+            (snapshot, zone_id),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Zone {zone_id} is not present in the current EQWOW index.")
+        downloaded = 0
+        if not row["detail_verified"]:
+            fetched, _ = self.crawl(
+                snapshot_id=snapshot, limit=1, priority=[("zone", zone_id)],
+                progress=progress, should_pause=should_pause,
+            )
+            downloaded += fetched
+            row = self.cache.db.execute(
+                "SELECT detail_verified,detail_json,name FROM records WHERE snapshot_id=? AND kind='zone' AND record_id=?",
+                (snapshot, zone_id),
+            ).fetchone()
+        if not row or not row["detail_json"]:
+            return downloaded, 0, 0
+        detail = json.loads(row["detail_json"])
+        targets: list[tuple[str, int]] = []
+        for view in detail.get("listviews", []):
+            template = str(view.get("template", "")).casefold()
+            if template not in {"npc", "object"}:
+                continue
+            for raw in view.get("data", []):
+                try:
+                    targets.append((template, int(raw["id"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        targets = list(dict.fromkeys(targets))
+        if targets and max_records > 0:
+            fetched, _ = self.crawl(
+                snapshot_id=snapshot, limit=min(int(max_records), len(targets)), priority=targets,
+                progress=progress, should_pause=should_pause,
+            )
+            downloaded += fetched
+        remaining = 0
+        for kind, record_id in targets:
+            target = self.cache.db.execute(
+                "SELECT detail_verified FROM records WHERE snapshot_id=? AND kind=? AND record_id=?",
+                (snapshot, kind, record_id),
+            ).fetchone()
+            if target and not target["detail_verified"]:
+                remaining += 1
+        return downloaded, len(targets), remaining
+
 def _entity_id(kind: str, record_id: int) -> str:
     return f"eqwow:{kind}:{int(record_id)}"
 
@@ -735,7 +796,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.6") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.7") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")
@@ -812,6 +873,7 @@ def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *
         bundle.entities[entity["id"]] = entity
     _build_index_facts(bundle, indexes, snapshot, snap["checked_at"])
     _build_relations(bundle, details, snapshot, snap["checked_at"])
+    _build_zone_maps(bundle)
     return bundle
 
 
@@ -901,6 +963,38 @@ def _add_source_zone(entity: dict[str, Any], zone_name: str | None) -> None:
         zones.append(zone_name)
 
 
+def _build_zone_maps(bundle: KnowledgeBundle) -> None:
+    member_counts: dict[str, int] = {}
+    pin_counts: dict[str, int] = {}
+    for edge in bundle.edges:
+        if edge.get("relation") == "LOCATED_IN":
+            zone_id = str(edge.get("to", ""))
+            member_counts[zone_id] = member_counts.get(zone_id, 0) + 1
+    for spawn in bundle.spawns:
+        zone_id = str(spawn.get("zone", ""))
+        pin_counts[zone_id] = pin_counts.get(zone_id, 0) + 1
+    zones: dict[str, Any] = {}
+    for entity in bundle.entities.values():
+        if entity.get("type") != "zone" or not entity.get("name"):
+            continue
+        entity_id = str(entity["id"])
+        zone_id = entity.get("realmId") or entity.get("clientId")
+        members = member_counts.get(entity_id, 0)
+        pins = pin_counts.get(entity_id, 0)
+        zones[entity["name"]] = {
+            "zoneId": zone_id,
+            "entity": entity_id,
+            "memberCount": members,
+            "pinCount": pins,
+            "source": entity.get("source", {}),
+            "note": (
+                f"EQWOW zone {zone_id} links {members:,} records. "
+                f"{pins:,} exact pin(s) are currently available from entity detail pages."
+            ),
+        }
+    bundle.maps = {"zones": zones}
+
+
 def _build_index_facts(
     bundle: KnowledgeBundle,
     indexes: dict[tuple[str, int], dict[str, Any]],
@@ -937,6 +1031,10 @@ def _build_index_facts(
             entity["zoneId"] = location_ids[0]
             if entity.get("sourceZones"):
                 entity["zone"] = entity["sourceZones"][0]
+            for zone_id in entity["zoneIds"]:
+                zone_entity = _entity_id("zone", zone_id)
+                if zone_entity in bundle.entities:
+                    _edge(bundle, entity["id"], "LOCATED_IN", zone_entity, entity["source"], confidence="medium", zoneId=zone_id)
 
         if kind != "item":
             continue
@@ -1066,8 +1164,24 @@ def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dic
                     target = _ensure_entity(bundle, template, raw, snapshot, checked_at)
                     if target:
                         _edge(bundle, source_id, "RELATED_TO", target, provenance)
+                if kind == "zone" and template in KINDS and template != "zone":
+                    target = _ensure_entity(bundle, template, raw, snapshot, checked_at)
+                    zone = bundle.entities[source_id]
+                    member = target and bundle.entities.get(target)
+                    if member:
+                        zone_name = zone.get("name")
+                        member["zoneId"] = record_id
+                        member["zone"] = zone_name
+                        zone_ids = member.setdefault("zoneIds", [])
+                        if record_id not in zone_ids:
+                            zone_ids.append(record_id)
+                        _add_source_zone(member, zone_name)
+                        _edge(
+                            bundle, target, "LOCATED_IN", source_id, provenance,
+                            confidence="high", zoneId=record_id, zone=zone_name, viaZonePage=True,
+                        )
         mapper = detail.get("mapper", {})
-        if kind == "npc" and isinstance(mapper, dict):
+        if kind in {"npc", "object"} and isinstance(mapper, dict):
             for zone_id, pins in mapper.items():
                 try:
                     zone_num = int(zone_id)

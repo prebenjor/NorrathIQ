@@ -233,7 +233,7 @@ function Data:GetRelations(entity, loadDetails)
     if type(entity) == "string" then entity = self.entities[entity] end
     if loadDetails ~= false then entity = self:EnsureEntityDetail(entity) end
     if not entity then return {} end
-    local keys = { "related", "quests", "turnins", "recipes", "components", "vendors", "trainers", "givers" }
+    local keys = { "related", "quests", "turnins", "recipes", "components", "vendors", "trainers", "givers", "locations", "contents" }
     local seen, output = {}, {}
     for _, key in ipairs(keys) do
         for _, id in ipairs(entity[key] or {}) do

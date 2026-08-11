@@ -10,12 +10,13 @@ local badgeColors = {
 
 function Inventory:Initialize()
     self.timer = CreateFrame("Frame")
+    self.timer:Hide()
     self.timer:SetScript("OnUpdate", function(_, elapsed)
-        if not self.pending then return end
         self.elapsed = self.elapsed + elapsed
         if self.elapsed >= 0.12 then
             self.elapsed, self.pending = 0, false
             self:Refresh()
+            self.timer:Hide()
         end
     end)
     if ContainerFrame_Update and hooksecurefunc then
@@ -30,6 +31,7 @@ end
 
 function Inventory:Schedule()
     self.pending, self.elapsed = true, 0
+    self.timer:Show()
 end
 
 function Inventory:GetBadge(button)

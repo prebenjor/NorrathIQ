@@ -4,9 +4,10 @@ NorrathIQ = NorrathIQ or {}
 local NIQ = NorrathIQ
 
 NIQ.name = ADDON_NAME or "NorrathIQ"
-NIQ.version = "1.3.0"
+NIQ.version = "1.3.1"
 NIQ.schemaVersion = 1
 NIQ.modules = NIQ.modules or {}
+NIQ.moduleOrder = NIQ.moduleOrder or {}
 NIQ.dataPacks = NIQ.dataPacks or {}
 NIQ.bagAdapters = NIQ.bagAdapters or {}
 NIQ.mapProviders = NIQ.mapProviders or {}
@@ -47,6 +48,7 @@ local characterDefaults = {
 }
 
 function NIQ:RegisterModule(name, module)
+    if not self.modules[name] then table.insert(self.moduleOrder, name) end
     self.modules[name] = module
     module.name = name
 end
@@ -126,7 +128,8 @@ end
 
 function NIQ:Initialize()
     self:MigrateSavedVariables()
-    for _, module in pairs(self.modules) do
+    for _, name in ipairs(self.moduleOrder) do
+        local module = self.modules[name]
         if module.Initialize then
             local ok, err = pcall(module.Initialize, module)
             if not ok then self:Print(module.name .. " failed to initialize: " .. tostring(err)) end
@@ -147,7 +150,8 @@ function NIQ:GetSourceVersions()
 end
 
 function NIQ:DispatchEvent(event, ...)
-    for _, module in pairs(self.modules) do
+    for _, name in ipairs(self.moduleOrder) do
+        local module = self.modules[name]
         if module.OnEvent then
             local ok, err = pcall(module.OnEvent, module, event, ...)
             if not ok then self:Print(module.name .. " event error: " .. tostring(err)) end
@@ -161,7 +165,6 @@ eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("BAG_UPDATE")
 eventFrame:RegisterEvent("QUEST_LOG_UPDATE")
-eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local loaded = ...
@@ -192,7 +195,7 @@ SlashCmdList.NORRATHIQ = function(message)
         if NIQ.Capture and NIQ.Capture.HandleCommand then
             NIQ.Capture:HandleCommand(rest)
         else
-            NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.0, then run /reload.")
+            NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
         end
     elseif command == "version" then
         local eqwow, capture, p99 = NIQ:GetSourceVersions()
@@ -209,6 +212,6 @@ SlashCmdList.NORRATHIQCAPTURE = function(message)
     if NIQ.Capture and NIQ.Capture.HandleCommand then
         NIQ.Capture:HandleCommand(message or "")
     else
-        NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.0, then run /reload.")
+        NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
     end
 end

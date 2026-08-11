@@ -278,7 +278,7 @@ function UI:CreateFrame()
     actions[2]:SetScript("OnClick", function() if UI.current then NIQ.Map:ShowEntity(UI.current, "turnin") end end)
     actions[3]:SetScript("OnClick", function()
         if not UI.current then return end
-        local relations = NIQ.Data:GetRelations(UI.current)
+        local relations = NIQ.Data:GetRelations(UI.current, false)
         if relations[1] then UI:ShowEntity(relations[1]) else NIQ:Print("No related record is available.") end
     end)
     actions[4]:SetScript("OnClick", function()
@@ -404,7 +404,7 @@ function UI:BuildDetailLinks(entity, relations)
     end
     for _, drop in ipairs(entity.drops or {}) do
         if count >= 12 then break end
-        local target, status = NIQ.Data:ResolveExact(drop.npc)
+        local target, status = NIQ.Data:ResolveExact(drop.npc, false, false)
         if status == "exact" and target then
             local npc = target
             y = self:AddDetailLink("Dropped by: " .. drop.npc .. " - " .. (drop.zone or "unknown zone"), function() UI:ShowEntity(npc) end, y)
@@ -433,8 +433,11 @@ function UI:Show(searchText)
 end
 
 function UI:ShowEntity(entity)
-    if type(entity) == "string" then entity = NIQ.Data:GetEntity(entity) end
-    entity = NIQ.Data:EnsureEntityDetail(entity)
+    if type(entity) == "string" then
+        entity = NIQ.Data:GetEntity(entity)
+    else
+        entity = NIQ.Data:EnsureEntityDetail(entity)
+    end
     if not entity then return end
     self.frame:Show()
     self.current = entity
@@ -485,7 +488,7 @@ function UI:ShowEntity(entity)
             table.insert(lines, "  - " .. drop.npc .. " - " .. (drop.zone or "unknown") .. (level and " (level " .. level .. ")" or "") .. chance)
         end
     end
-    local relations = NIQ.Data:GetRelations(entity)
+    local relations = NIQ.Data:GetRelations(entity, false)
     if #relations > 0 then
         table.insert(lines, "")
         table.insert(lines, "|cffffd100Related|r")

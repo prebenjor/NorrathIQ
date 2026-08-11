@@ -81,8 +81,10 @@ function Data:ApplyOverlay(id, overlay)
         for _, alias in ipairs(existing.aliases or {}) do
             removeIndexedId(self.aliases, NIQ:Normalize(alias), id)
         end
-        for questId, entityId in pairs(self.questIds) do
-            if entityId == id then self.questIds[questId] = nil end
+        if existing.type == "quest" or overlay.type == "quest" then
+            for questId, entityId in pairs(self.questIds) do
+                if entityId == id then self.questIds[questId] = nil end
+            end
         end
     end
 
@@ -106,6 +108,7 @@ function Data:ApplyOverlay(id, overlay)
         self.questIds[tonumber(questId) or questId] = id
     end
     if not existing then self.entityCount = (self.entityCount or 0) + 1 end
+    self.revision = (self.revision or 0) + 1
     return true
 end
 
@@ -168,7 +171,6 @@ end
 
 function Data:Rebuild()
     self.entities, self.exact, self.aliases, self.questIds, self.zones, self.spawns = {}, {}, {}, {}, {}, {}
-    local exactSeen, aliasSeen = {}, {}
     local detailPacks, detailHashPacks, overlays = {}, {}, {}
     self.externalTotal = nil
     for _, pack in pairs(NIQ.dataPacks) do
@@ -217,28 +219,17 @@ function Data:Rebuild()
     end
     local entityCount = 0
     for id, entity in pairs(self.entities) do
-            entityCount = entityCount + 1
-            local canonical = NIQ:Normalize(entity.name)
-            if not self.exact[canonical] then self.exact[canonical] = {} end
-            local exactKey = canonical .. "\031" .. id
-            if not exactSeen[exactKey] then
-                exactSeen[exactKey] = true
-                table.insert(self.exact[canonical], id)
-            end
-            for _, alias in ipairs(entity.aliases or {}) do
-                local normalized = NIQ:Normalize(alias)
-                if not self.aliases[normalized] then self.aliases[normalized] = {} end
-                local aliasKey = normalized .. "\031" .. id
-                if not aliasSeen[aliasKey] then
-                    aliasSeen[aliasKey] = true
-                    table.insert(self.aliases[normalized], id)
-                end
-            end
-            if entity.type == "quest" and (entity.questId or entity.clientId) then
-                self.questIds[tonumber(entity.questId or entity.clientId) or entity.questId or entity.clientId] = id
-            end
+        entityCount = entityCount + 1
+        insertIndexedId(self.exact, NIQ:Normalize(entity.name), id)
+        for _, alias in ipairs(entity.aliases or {}) do
+            insertIndexedId(self.aliases, NIQ:Normalize(alias), id)
+        end
+        if entity.type == "quest" and (entity.questId or entity.clientId) then
+            self.questIds[tonumber(entity.questId or entity.clientId) or entity.questId or entity.clientId] = id
+        end
     end
     self.entityCount = entityCount
+    self.revision = (self.revision or 0) + 1
 end
 
 function Data:GetQuestByRealmId(questId)

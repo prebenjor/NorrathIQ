@@ -1,16 +1,21 @@
 local NIQ = NorrathIQ
-local Capture = { pendingBagScan = false, elapsed = 0, lastTarget = nil, lastKill = nil }
+local Capture = {
+    pendingBagScan = false, pendingQuestScan = false,
+    bagElapsed = 0, questElapsed = 0, lastTarget = nil, lastKill = nil,
+}
 NIQ.Capture = Capture
 NIQ:RegisterModule("Capture", Capture)
 
 local CAPTURE_SCHEMA = 1
 local MAX_NPC_POINTS = 80
-local LIVE_FLUSH_DELAY = 0.6
-local observedEvents = {
-    "PLAYER_TARGET_CHANGED", "QUEST_LOG_UPDATE", "QUEST_DETAIL", "QUEST_PROGRESS",
+local liveEvents = {
+    "PLAYER_TARGET_CHANGED", "QUEST_DETAIL", "QUEST_PROGRESS",
     "QUEST_COMPLETE", "QUEST_GREETING", "QUEST_ACCEPTED", "LOOT_OPENED",
-    "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "BANKFRAME_OPENED", "MERCHANT_SHOW",
-    "ZONE_CHANGED_NEW_AREA", "COMBAT_LOG_EVENT_UNFILTERED", "SPELLS_CHANGED",
+    "BANKFRAME_OPENED", "MERCHANT_SHOW",
+}
+local captureOnlyEvents = {
+    "TRADE_SKILL_SHOW", "TRADE_SKILL_UPDATE", "ZONE_CHANGED_NEW_AREA",
+    "COMBAT_LOG_EVENT_UNFILTERED", "SPELLS_CHANGED",
 }
 
 local function countKeys(value)
@@ -93,26 +98,32 @@ function Capture:Initialize()
     end
     self.db = NorrathIQCaptureDB
     self:InitializeLivePack()
-    for _, event in ipairs(observedEvents) do NIQ.eventFrame:RegisterEvent(event) end
+    for _, event in ipairs(liveEvents) do NIQ.eventFrame:RegisterEvent(event) end
+    self:SetCaptureOnlyEvents(self.db.enabled)
     self.timer = CreateFrame("Frame")
+    self.timer:Hide()
     self.timer:SetScript("OnUpdate", function(_, elapsed)
-        if self.pendingBagScan then
-            self.elapsed = self.elapsed + elapsed
-        end
-        if self.pendingLiveFlush then
-            self.liveElapsed = (self.liveElapsed or 0) + elapsed
-        end
-        if self.pendingBagScan and self.elapsed >= 0.4 then
-            self.elapsed, self.pendingBagScan = 0, false
+        if self.pendingBagScan then self.bagElapsed = self.bagElapsed + elapsed end
+        if self.pendingQuestScan then self.questElapsed = self.questElapsed + elapsed end
+        if self.pendingBagScan and self.bagElapsed >= 0.4 then
+            self.bagElapsed, self.pendingBagScan = 0, false
             self:ScanContainers("bags")
         end
-        if self.pendingLiveFlush and self.liveElapsed >= LIVE_FLUSH_DELAY then
-            self:FlushLive()
+        if self.pendingQuestScan and self.questElapsed >= 0.3 then
+            self.questElapsed, self.pendingQuestScan = 0, false
+            self:CaptureQuestLog()
         end
+        if not self.pendingBagScan and not self.pendingQuestScan then self.timer:Hide() end
     end)
     if self.db.enabled then
         self:TouchRealmMetadata()
         self:ScheduleBagScan()
+    end
+end
+
+function Capture:SetCaptureOnlyEvents(enabled)
+    for _, event in ipairs(captureOnlyEvents) do
+        if enabled then NIQ.eventFrame:RegisterEvent(event) else NIQ.eventFrame:UnregisterEvent(event) end
     end
 end
 
@@ -170,14 +181,7 @@ function Capture:PublishEntity(id, entity)
     entity.observedAt = now()
     entity._signature = signature
     self.livePack.entities[id] = entity
-    if NIQ.Data and NIQ.Data.ApplyOverlay and NIQ.Data:ApplyOverlay(id, entity) then
-        -- Incremental update completed; no global index rebuild is needed.
-    else
-        self.liveDirty = true
-        self.pendingLiveFlush = true
-        self.liveElapsed = 0
-    end
-    return true
+    return NIQ.Data:ApplyOverlay(id, entity)
 end
 
 function Capture:PublishItem(record)
@@ -205,7 +209,7 @@ function Capture:PublishNPC(key, record)
     self:PublishEntity(id, {
         type = "npc", name = record.name, clientId = record.entryId, realmId = record.entryId,
         classification = record.classification or record.creatureType or "Observed NPC",
-        level = level, zone = newest and newest.zone,
+        level = level, zone = (newest and newest.zone) or record.lastZone,
         map = newest and newest.x and { zone = newest.zone, mapId = newest.mapId, x = newest.x, y = newest.y, confidence = "observed" } or nil,
         source = { name = "Game capture", sourceId = "game-capture", confidence = "observed" },
     })
@@ -226,17 +230,8 @@ function Capture:PublishQuest(key, record)
     })
 end
 
-function Capture:FlushLive()
-    self.pendingLiveFlush = false
-    self.liveElapsed = 0
-    if self.liveDirty and NIQ.Data and NIQ.Data.Rebuild then
-        self.liveDirty = false
-        NIQ.Data:Rebuild()
-    end
-end
-
 function Capture:InitializeLivePack()
-    local realm = self:GetRealmDB()
+    local realm = self.db.realms[self:GetRealmKey()] or {}
     self.livePack = {
         meta = {
             id = "capture-live:" .. normalizedKey(self:GetRealmKey()), schemaVersion = NIQ.schemaVersion,
@@ -248,7 +243,6 @@ function Capture:InitializeLivePack()
     for _, record in pairs(realm.items or {}) do self:PublishItem(record) end
     for key, record in pairs(realm.npcs or {}) do self:PublishNPC(key, record) end
     for key, record in pairs(realm.quests or {}) do self:PublishQuest(key, record) end
-    self:FlushLive()
 end
 
 function Capture:TouchRealmMetadata()
@@ -266,19 +260,20 @@ function Capture:TouchRealmMetadata()
         }
     end
     if GetBuildInfo then
-        local version, build, date, toc = GetBuildInfo()
+        local version, build, _, toc = GetBuildInfo()
         realm.meta.clientVersion = version
         realm.meta.clientBuild = build
         realm.meta.interface = toc
     end
 end
 
-function Capture:GetPosition()
+function Capture:GetPosition(includeCoordinates)
     local position = {
         zone = GetRealZoneText and GetRealZoneText() or (GetZoneText and GetZoneText()) or "Unknown",
         subzone = GetSubZoneText and GetSubZoneText() or nil,
         observedAt = now(),
     }
+    if not includeCoordinates then return position end
     local previousMap = GetCurrentMapAreaID and GetCurrentMapAreaID() or nil
     if SetMapToCurrentZone then pcall(SetMapToCurrentZone) end
     position.mapId = GetCurrentMapAreaID and GetCurrentMapAreaID() or previousMap
@@ -299,16 +294,17 @@ function Capture:ObserveItem(link, source)
     local realm = self:GetWorkingRealm()
     local key = tostring(itemId)
     local record = realm.items[key]
-    if record and source == "tooltip" and record.itemInfoCaptured then
+    if record and source ~= "manual_rescan" and record.itemInfoCaptured then
         record.lastSeen = now()
-        if not record.sources.tooltip then record.sources.tooltip = 1 end
+        local sourceKey = source or "unknown"
+        if not record.sources[sourceKey] then record.sources[sourceKey] = 1 end
         return key
     end
     if not record then
         record = { clientId = itemId, firstSeen = now(), sources = {}, stats = {} }
         realm.items[key] = record
     end
-    local name, canonicalLink, quality, itemLevel, requiredLevel, itemType, itemSubType,
+    local name, _, quality, itemLevel, requiredLevel, itemType, itemSubType,
         maxStack, equipLoc, texture, vendorValue = GetItemInfo(link)
     record.name = name or record.name or NIQ:ItemNameFromLink(link)
     if name then record.itemInfoCaptured = true end
@@ -340,7 +336,17 @@ function Capture:ObserveItem(link, source)
 end
 
 function Capture:ScheduleBagScan()
-    if self:IsObserving() then self.pendingBagScan, self.elapsed = true, 0 end
+    if self:IsObserving() then
+        self.pendingBagScan, self.bagElapsed = true, 0
+        if self.timer then self.timer:Show() end
+    end
+end
+
+function Capture:ScheduleQuestScan()
+    if self:IsObserving() then
+        self.pendingQuestScan, self.questElapsed = true, 0
+        if self.timer then self.timer:Show() end
+    end
 end
 
 function Capture:ScanContainers(source)
@@ -355,13 +361,12 @@ function Capture:ScanContainers(source)
     if GetInventoryItemLink then
         for slot = 1, 19 do self:ObserveItem(GetInventoryItemLink("player", slot), "equipment") end
     end
-    self:FlushLive()
+    if NIQ.Inventory then NIQ.Inventory:Schedule() end
 end
 
 function Capture:ScanMerchant()
     if not self:IsObserving() or not GetMerchantNumItems or not GetMerchantItemLink then return end
     for index = 1, GetMerchantNumItems() do self:ObserveItem(GetMerchantItemLink(index), "merchant") end
-    self:FlushLive()
 end
 
 function Capture:ObserveNPC(unit, context)
@@ -389,10 +394,11 @@ function Capture:ObserveNPC(unit, context)
     record.reaction = UnitReaction and UnitReaction("player", unit) or record.reaction
     record.lastSeen = now()
     increment(record.contexts, context or "target")
-    self:AddNPCPosition(record, self:GetPosition(), context)
+    local position = self:GetPosition(self:IsEnabled())
+    record.lastZone = position.zone
+    self:AddNPCPosition(record, position, context)
     self.lastTarget = { key = key, guid = guid, name = name, observedAt = now() }
     self:PublishNPC(key, record)
-    self:FlushLive()
     return key
 end
 
@@ -422,7 +428,7 @@ function Capture:CaptureQuestLog()
     if not self:IsObserving() or not GetNumQuestLogEntries or not GetQuestLogTitle then return end
     local realm = self:GetWorkingRealm()
     for questIndex = 1, GetNumQuestLogEntries() do
-        local title, level, tag, isHeader, isCollapsed, isComplete, frequency, questId = GetQuestLogTitle(questIndex)
+        local title, level, tag, isHeader, _, isComplete, frequency, questId = GetQuestLogTitle(questIndex)
         if title and not isHeader then
             local key = questId and questId > 0 and tostring(questId) or "title:" .. normalizedKey(title)
             local temporaryKey = "title:" .. normalizedKey(title)
@@ -447,7 +453,6 @@ function Capture:CaptureQuestLog()
             self:PublishQuest(key, record)
         end
     end
-    self:FlushLive()
 end
 
 function Capture:CurrentQuestRecord()
@@ -482,7 +487,7 @@ function Capture:CaptureQuestInteraction(role)
         increment(quest.interactions[npcKey], role)
         quest.interactions[npcKey].lastSeen = now()
     end
-    if GetQuestItemLink then
+    if quest and GetQuestItemLink then
         local choices = GetNumQuestChoices and GetNumQuestChoices() or 0
         local rewards = GetNumQuestRewards and GetNumQuestRewards() or 0
         quest.choices, quest.rewards = {}, {}
@@ -507,7 +512,6 @@ function Capture:CaptureQuestInteraction(role)
         local key = quest.questId and tostring(quest.questId) or "title:" .. normalizedKey(quest.name)
         self:PublishQuest(key, quest)
     end
-    self:FlushLive()
 end
 
 function Capture:CaptureLoot()
@@ -534,7 +538,6 @@ function Capture:CaptureLoot()
             lootRecord.items[itemKey].lastSeen = now()
         end
     end
-    self:FlushLive()
 end
 
 function Capture:CaptureTradeskills()
@@ -556,7 +559,7 @@ function Capture:CaptureTradeskills()
             record.components = {}
             local reagents = GetTradeSkillNumReagents and GetTradeSkillNumReagents(index) or 0
             for reagentIndex = 1, reagents do
-                local reagentName, texture, required = GetTradeSkillReagentInfo(index, reagentIndex)
+                local reagentName, _, required = GetTradeSkillReagentInfo(index, reagentIndex)
                 local reagentLink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(index, reagentIndex)
                 table.insert(record.components, {
                     itemId = self:ObserveItem(reagentLink, "tradeskill_reagent"),
@@ -645,7 +648,7 @@ function Capture:OnEvent(event, ...)
     elseif event == "PLAYER_TARGET_CHANGED" then
         self:ObserveNPC("target", "target")
     elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_ACCEPTED" then
-        self:CaptureQuestLog()
+        self:ScheduleQuestScan()
     elseif event == "QUEST_DETAIL" then
         self:CaptureQuestInteraction("giver")
     elseif event == "QUEST_PROGRESS" then
@@ -670,7 +673,7 @@ function Capture:OnEvent(event, ...)
 end
 
 function Capture:Status()
-    local realm = self:GetRealmDB()
+    local realm = self.db.realms[self:GetRealmKey()] or self.sessionRealm or {}
     return string.format(
         "%s for %s - %d items, %d NPCs, %d quests, %d recipes, %d spells, %d loot sources",
         self:IsEnabled() and "ON" or "OFF", self:GetRealmKey(),
@@ -683,6 +686,7 @@ function Capture:HandleCommand(argument)
     argument = string.lower(NIQ:Normalize(argument))
     if argument == "on" then
         self.db.enabled = true
+        self:SetCaptureOnlyEvents(true)
         self:TouchRealmMetadata()
         self:ScheduleBagScan()
         self:CaptureQuestLog()
@@ -690,6 +694,7 @@ function Capture:HandleCommand(argument)
         NIQ:Print("Realm capture enabled. Data stays local in NorrathIQCaptureDB.")
     elseif argument == "off" then
         self.db.enabled = false
+        self:SetCaptureOnlyEvents(false)
         NIQ:Print("Realm capture disabled. Existing observations were preserved.")
     elseif argument == "status" or argument == "" then
         NIQ:Print("Capture " .. self:Status())
@@ -703,8 +708,7 @@ function Capture:HandleCommand(argument)
     elseif argument == "clear confirm" then
         self.db.realms[self:GetRealmKey()] = nil
         if self.livePack then self.livePack.entities = {} end
-        self.liveDirty = true
-        self:FlushLive()
+        NIQ.Data:Rebuild()
         NIQ:Print("Captured observations for this realm were removed.")
     else
         NIQ:Print("/niq capture <on|off|status|rescan|clear>")

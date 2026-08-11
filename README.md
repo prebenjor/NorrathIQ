@@ -268,7 +268,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua) for current signatures.
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.0
+.\scripts\package-release.ps1 -Version 1.3.1
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

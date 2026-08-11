@@ -151,7 +151,16 @@ function Map:ShowZone(zone, target)
     self:ClearMarkers()
     self.frame.title:SetText(zone)
     local zoneData = NIQ.Data.zones[zone]
-    self.frame.note:SetText(zoneData and zoneData.note or "Zone known, but no trustworthy exact coordinates are available.")
+    local note = zoneData and zoneData.note or "Zone known, but no trustworthy exact coordinates are available."
+    local shown = 0
+    local selectedMarker = target and target.marker
+    for markerId, spawn in pairs(NIQ.Data.spawns or {}) do
+        if shown >= 80 then break end
+        if markerId ~= selectedMarker and (spawn.zone == zone or (zoneData and spawn.zoneId == zoneData.zoneId)) then
+            self:AddMarker(spawn.x, spawn.y, spawn.label, spawn.confidence)
+            shown = shown + 1
+        end
+    end
     if target and target.map and target.map.zone == zone then
         self:AddMarker(target.map.x, target.map.y, target.name, target.map.confidence)
     end
@@ -159,7 +168,9 @@ function Map:ShowZone(zone, target)
         local spawn = NIQ.Data.spawns[target.marker]
         self:AddMarker(spawn.x, spawn.y, spawn.label, spawn.confidence)
         self:AddPath(spawn.path)
+        shown = shown + 1
     end
+    self.frame.note:SetText(note .. " Showing " .. tostring(shown) .. " exact pin(s) currently downloaded.")
     self.frame:Show()
 end
 

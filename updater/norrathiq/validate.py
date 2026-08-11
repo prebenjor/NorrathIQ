@@ -8,7 +8,7 @@ from .models import KnowledgeBundle, ValidationIssue
 from .normalize import normalize_name
 
 RELATIONS = {
-    "DROPPED_BY", "SPAWNS_AT", "QUEST_INPUT", "QUEST_REWARD", "TURN_IN_TO",
+    "DROPPED_BY", "SPAWNS_AT", "LOCATED_IN", "QUEST_INPUT", "QUEST_REWARD", "TURN_IN_TO",
     "RECIPE_INPUT", "CRAFTED_BY", "COMPANION_ITEM", "KEY_STEP", "RELATED_TO",
     "SOLD_BY", "TRAINED_BY", "QUEST_GIVER",
 }

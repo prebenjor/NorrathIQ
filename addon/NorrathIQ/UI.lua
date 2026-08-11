@@ -60,7 +60,7 @@ end
 
 local function append(lines, label, value)
     if value == nil or value == "" then return end
-    table.insert(lines, "|cffffd100" .. label .. ":|r |cff2b1b0e" .. tostring(value) .. "|r")
+    table.insert(lines, "|cffffd100" .. label .. ":|r |cfff4ead2" .. tostring(value) .. "|r")
 end
 
 function UI:Initialize()
@@ -215,7 +215,9 @@ function UI:CreateFrame()
     local detailPane = CreateFrame("Frame", nil, frame)
     detailPane:SetPoint("TOPLEFT", listPane, "TOPRIGHT", 12, 0)
     detailPane:SetPoint("BOTTOMRIGHT", -18, 76)
-    makeInset(detailPane, true)
+    -- QuestBG is translucent against the 3D world. Use the native tooltip
+    -- panel here so long database descriptions remain readable everywhere.
+    makeInset(detailPane, false)
     frame.detailPane = detailPane
 
     local detailIcon = detailPane:CreateTexture(nil, "ARTWORK")
@@ -236,13 +238,13 @@ function UI:CreateFrame()
     frame.detailName = detailName
     local detailType = detailPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     detailType:SetPoint("TOPLEFT", detailName, "BOTTOMLEFT", 0, -5)
-    detailType:SetTextColor(0.35, 0.20, 0.08)
+    detailType:SetTextColor(0.82, 0.76, 0.62)
     detailType:SetText("Knowledge details appear here")
     frame.detailType = detailType
 
     local detailRule = detailPane:CreateTexture(nil, "ARTWORK")
     detailRule:SetTexture("Interface\\Buttons\\WHITE8X8")
-    detailRule:SetVertexColor(0.45, 0.28, 0.08, 0.7)
+    detailRule:SetVertexColor(0.72, 0.55, 0.18, 0.8)
     detailRule:SetHeight(1)
     detailRule:SetPoint("TOPLEFT", 14, -65)
     detailRule:SetPoint("TOPRIGHT", -14, -65)
@@ -261,7 +263,7 @@ function UI:CreateFrame()
     detail:SetJustifyH("LEFT")
     detail:SetJustifyV("TOP")
     detail:SetSpacing(3)
-    detail:SetTextColor(0.16, 0.09, 0.035)
+    detail:SetTextColor(0.94, 0.91, 0.84)
     frame.detail = detail
     frame.detailLinks = {}
 
@@ -316,7 +318,7 @@ function UI:CreateFrame()
 
     local footer = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footer:SetPoint("BOTTOMLEFT", 22, 18)
-    footer:SetText("Offline journal - EQWOW primary + captured realm overlay - never auto-sells or destroys")
+    footer:SetText("Offline journal - EQWOW Database - never auto-sells or destroys")
     self.frame = frame
 end
 
@@ -356,7 +358,7 @@ end
 function UI:CopySourceURL()
     local url = self.current and self.current.source and self.current.source.url
     if not url or not string.find(url, "^https?://") then
-        NIQ:Print("This record is a local client observation and has no external database page.")
+        NIQ:Print("This record has no external database page.")
         return
     end
     if ChatFrame_OpenChat then
@@ -484,19 +486,37 @@ function UI:ShowEntity(entity)
         table.insert(lines, "|cffffd100Found from|r")
         for _, drop in ipairs(entity.drops) do
             local chance = drop.chance and " - approx. " .. tostring(drop.chance) .. "%" or ""
-            local level = drop.level or ((drop.minLevel or drop.maxLevel) and tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?") or nil)
+            local level = drop.level
+            if not level and (drop.minLevel or drop.maxLevel) then
+                if drop.minLevel and drop.maxLevel and drop.minLevel == drop.maxLevel then
+                    level = tostring(drop.minLevel)
+                else
+                    level = tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?")
+                end
+            end
             table.insert(lines, "  - " .. drop.npc .. " - " .. (drop.zone or "unknown") .. (level and " (level " .. level .. ")" or "") .. chance)
         end
+    end
+    if entity.sourceZones and #entity.sourceZones > 0 then
+        table.insert(lines, "")
+        table.insert(lines, "|cffffd100Known source zones|r")
+        for _, zone in ipairs(entity.sourceZones) do table.insert(lines, "  - " .. tostring(zone)) end
     end
     local relations = NIQ.Data:GetRelations(entity, false)
     if #relations > 0 then
         table.insert(lines, "")
         table.insert(lines, "|cffffd100Related|r")
-        for _, relation in ipairs(relations) do table.insert(lines, "  - " .. relation.name .. " [" .. relation.type .. "]") end
+        for index, relation in ipairs(relations) do
+            if index > 40 then
+                table.insert(lines, "  +" .. tostring(#relations - 40) .. " more linked records")
+                break
+            end
+            table.insert(lines, "  - " .. relation.name .. " [" .. relation.type .. "]")
+        end
     end
     local recommendation = NIQ.Recommendation:Evaluate(entity)
     table.insert(lines, "")
-    table.insert(lines, "|cffffd100Recommendation:|r " .. recommendation.action)
+    table.insert(lines, "|cffffd100Inventory guidance:|r " .. recommendation.action)
     table.insert(lines, recommendation.reason)
     local comparison = NIQ.Recommendation:CompareEquipped(entity)
     if comparison then
@@ -505,11 +525,11 @@ function UI:ShowEntity(entity)
     end
     if entity.source then
         table.insert(lines, "")
-        table.insert(lines, "|cff6b5030Source: " .. (entity.source.name or entity.source.sourceId or "local observation") .. "|r")
+        table.insert(lines, "|cff9fb7c2Source: " .. (entity.source.name or entity.source.sourceId or "unknown source") .. "|r")
         append(lines, "Source record ID", entity.source.recordId)
         append(lines, "Snapshot", entity.source.snapshotDate or entity.source.snapshotId)
-        table.insert(lines, "|cff6b5030Confidence: " .. (entity.source.confidence or "unknown") .. (entity.source.transport == "unverified-http" and " - unverified HTTP" or "") .. "|r")
-        table.insert(lines, "|cff6b5030" .. (entity.source.url or "No external source URL") .. "|r")
+        table.insert(lines, "|cff9fb7c2Confidence: " .. (entity.source.confidence or "unknown") .. (entity.source.transport == "unverified-http" and " - unverified HTTP" or "") .. "|r")
+        table.insert(lines, "|cff79b8d8" .. (entity.source.url or "No external source URL") .. "|r")
     end
     self.frame.detail:SetText(table.concat(lines, "\n"))
     self:BuildDetailLinks(entity, relations)

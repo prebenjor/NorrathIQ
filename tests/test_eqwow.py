@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from norrathiq.eqwow import (
+from updater.norrathiq.eqwow import (
     EqwowCache,
     EqwowSource,
     build_bundle_from_cache,
@@ -12,9 +12,9 @@ from norrathiq.eqwow import (
     parse_index_page,
     validate_source_url,
 )
-from norrathiq.models import KnowledgeBundle
-from norrathiq.realm import merge_realm
-from norrathiq.validate import validate_bundle
+from updater.norrathiq.models import KnowledgeBundle
+from updater.norrathiq.realm import merge_realm
+from updater.norrathiq.validate import validate_bundle
 
 
 def detail_page(kind: str, record_id: int, name: str, *, tooltip: str = "", mapper=None, views=(), header=None) -> str:
@@ -95,6 +95,160 @@ def test_gnoll_fang_relations_and_npc_spawn(tmp_path):
     assert not [issue for issue in validate_bundle(bundle) if issue.level == "error"]
 
 
+def test_item_and_drop_npc_details_compile_map_marker(tmp_path):
+    item_html = detail_page("item", 88751, "Ghoulbane", views=(
+        {"template": "npc", "id": "dropped-by", "data": [
+            {"id": 50423, "name": "the froglok shin lord", "minlevel": 30, "maxlevel": 30,
+             "location": [5146], "percent": 25},
+        ]},
+        {"template": "item", "id": "see-also", "data": [
+            {"id": 96147, "name": "Corrupted Ghoulbane"},
+        ]},
+    ))
+    npc_html = detail_page("npc", 50423, "the froglok shin lord", mapper={
+        "5146": [{"coords": [[42.6, 94.1, {}]], "count": 1}],
+    })
+
+    class FakeClient:
+        def get(self, url):
+            if "?item=88751" in url:
+                return item_html, {}
+            if "?npc=50423" in url:
+                return npc_html, {}
+            raise AssertionError(url)
+
+    with EqwowCache(tmp_path / "targeted.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "item", [{"kind": "item", "id": 88751, "name": "Ghoulbane", "fields": {"id": 88751}}])
+        cache.put_indexes(snapshot, "npc", [{"kind": "npc", "id": 50423, "name": "the froglok shin lord", "fields": {"id": 50423}}])
+        cache.put_indexes(snapshot, "zone", [{"kind": "zone", "id": 5146, "name": "Guk", "fields": {"id": 5146}}])
+        cache.finish_index(snapshot)
+        downloaded, remaining = EqwowSource(cache, FakeClient()).crawl(
+            limit=2, priority=[("item", 88751), ("npc", 50423)]
+        )
+        bundle = build_bundle_from_cache(cache)
+
+    assert (downloaded, remaining) == (2, 1)
+    drop = next(edge for edge in bundle.edges if edge["from"] == "eqwow:item:88751" and edge["relation"] == "DROPPED_BY")
+    assert drop["zone"] == "Guk" and drop["dropChance"] == 25
+    assert not any(edge["relation"] == "RELATED_TO" for edge in bundle.edges)
+    assert bundle.entities["eqwow:npc:50423"]["zone"] == "Guk"
+    from updater.norrathiq.compiler import bundle_to_pack
+    packed = bundle_to_pack(bundle)
+    packed_drop = packed["entities"]["eqwow:item:88751"]["drops"][0]
+    assert packed_drop["zone"] == "Guk"
+    assert packed_drop["marker"]
+    assert packed["spawns"][packed_drop["marker"]]["x"] == 0.426
+
+
+def test_zone_page_links_members_and_compiles_available_pins(tmp_path):
+    zone_html = detail_page("zone", 5218, "Estate of Unrest", views=(
+        {"template": "npc", "id": "npcs", "data": [
+            {"id": 50319, "name": "Garanel Rucksif", "location": [5218], "minlevel": 35, "maxlevel": 35},
+        ]},
+        {"template": "object", "id": "objects", "data": [
+            {"id": 274571, "name": "a dusty old backbone", "location": [5218]},
+        ]},
+        {"template": "quest", "id": "quests", "data": [
+            {"id": 32406, "name": "Khrix_Fritchoff Quest", "category": 5218},
+        ]},
+    ))
+    npc_html = detail_page("npc", 50319, "Garanel Rucksif", mapper={
+        "5218": [{"coords": [[52.1, 44.8, {}]], "count": 1}],
+    })
+    object_html = detail_page("object", 274571, "a dusty old backbone", mapper={
+        "5218": [{"coords": [[31.2, 68.4, {}]], "count": 1}],
+    })
+    quest_html = detail_page("quest", 32406, "Khrix_Fritchoff Quest")
+
+    class FakeClient:
+        def get(self, url):
+            for query, html in (
+                ("?zone=5218", zone_html), ("?npc=50319", npc_html),
+                ("?object=274571", object_html), ("?quest=32406", quest_html),
+            ):
+                if query in url:
+                    return html, {}
+            raise AssertionError(url)
+
+    with EqwowCache(tmp_path / "zone.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        for kind, record_id, name in (
+            ("zone", 5218, "Estate of Unrest"), ("npc", 50319, "Garanel Rucksif"),
+            ("object", 274571, "a dusty old backbone"), ("quest", 32406, "Khrix_Fritchoff Quest"),
+        ):
+            cache.put_indexes(snapshot, kind, [{"kind": kind, "id": record_id, "name": name, "fields": {"id": record_id}}])
+        cache.finish_index(snapshot)
+        downloaded, targets, zone_remaining = EqwowSource(cache, FakeClient()).crawl_zone(5218)
+        # Quest details are not required for zone mapping; membership comes from the zone page.
+        bundle = build_bundle_from_cache(cache)
+
+    assert (downloaded, targets, zone_remaining) == (3, 2, 0)
+    located = {
+        edge["from"] for edge in bundle.edges
+        if edge["relation"] == "LOCATED_IN" and edge["to"] == "eqwow:zone:5218"
+    }
+    assert located == {"eqwow:npc:50319", "eqwow:object:274571", "eqwow:quest:32406"}
+    assert {spawn["entity"] for spawn in bundle.spawns} == {"eqwow:npc:50319", "eqwow:object:274571"}
+    from updater.norrathiq.compiler import bundle_to_pack
+    packed = bundle_to_pack(bundle)
+    zone = packed["entities"]["eqwow:zone:5218"]
+    assert set(zone["contents"]) == located
+    assert bundle.maps["zones"]["Estate of Unrest"]["memberCount"] == 3
+    assert bundle.maps["zones"]["Estate of Unrest"]["pinCount"] == 2
+    assert packed["zones"]["Estate of Unrest"]["memberCount"] == 3
+    assert packed["zones"]["Estate of Unrest"]["zoneId"] == 5218
+
+
+def test_lightweight_indexes_compile_sources_and_locations_without_details(tmp_path):
+    with EqwowCache(tmp_path / "index-facts.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "zone", [
+            {"kind": "zone", "id": 5146, "name": "Guk", "fields": {"id": 5146}},
+        ])
+        cache.put_indexes(snapshot, "npc", [
+            {"kind": "npc", "id": 50423, "name": "the froglok shin lord", "fields": {
+                "id": 50423, "minlevel": 30, "maxlevel": 30, "location": [5146],
+            }},
+        ])
+        cache.put_indexes(snapshot, "quest", [
+            {"kind": "quest", "id": 31617, "name": "Corrupted Ghoulbane", "fields": {"id": 31617, "category": 5146}},
+        ])
+        cache.put_indexes(snapshot, "spell", [
+            {"kind": "spell", "id": 90705, "name": "Create Ghoulbane", "fields": {"id": 90705}},
+        ])
+        cache.put_indexes(snapshot, "item", [
+            {"kind": "item", "id": 88751, "name": "Ghoulbane", "fields": {
+                "id": 88751, "source": [1, 2, 4], "sourcemore": [
+                    {"n": "the froglok shin lord", "t": 1, "ti": 50423, "z": 5146},
+                    {"n": "Corrupted Ghoulbane", "t": 5, "ti": 31617, "z": 5146},
+                    {"n": "Create Ghoulbane", "t": 6, "ti": 90705},
+                ],
+            }},
+        ])
+        cache.finish_index(snapshot)
+        bundle = build_bundle_from_cache(cache)
+
+    assert bundle.entities["eqwow:npc:50423"]["zone"] == "Guk"
+    assert bundle.entities["eqwow:item:88751"]["sourceZones"] == ["Guk"]
+    relations = {(edge["from"], edge["relation"], edge["to"]) for edge in bundle.edges}
+    assert ("eqwow:item:88751", "DROPPED_BY", "eqwow:npc:50423") in relations
+    assert ("eqwow:quest:31617", "QUEST_REWARD", "eqwow:item:88751") in relations
+    assert ("eqwow:item:88751", "CRAFTED_BY", "eqwow:spell:90705") in relations
+
+
+def test_full_detail_queue_prioritizes_npcs_and_uses_compact_rows(tmp_path):
+    with EqwowCache(tmp_path / "pending.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "item", [{"kind": "item", "id": 1, "name": "Item", "fields": {"id": 1, "large": "x" * 1000}}])
+        cache.put_indexes(snapshot, "npc", [{"kind": "npc", "id": 2, "name": "NPC", "fields": {"id": 2}}])
+        cache.finish_index(snapshot)
+        rows = cache.pending(snapshot)
+        assert [(row["kind"], row["record_id"]) for row in rows] == [("npc", 2), ("item", 1)]
+        assert "index_json" not in rows[0].keys()
+        assert cache.pending_count(snapshot) == 2
+
+
 def test_custom_bind_and_moonfire_are_wow_namespaced():
     bind = parse_detail_page("spell", 86901, detail_page(
         "spell", 86901, "Bind Affinity (Self)",
@@ -121,7 +275,7 @@ def test_index_parser_is_inert_and_source_urls_are_locked():
         validate_source_url("http://50.6.248.85/other/?item=1")
 
 
-def test_capture_matches_eqwow_by_numeric_id_before_name():
+def test_realm_export_matches_eqwow_by_numeric_id_before_name():
     base = KnowledgeBundle.empty("base")
     base.manifest["source"] = "EQWOW Database"
     base.entities["eqwow:spell:86901"] = {
@@ -129,21 +283,21 @@ def test_capture_matches_eqwow_by_numeric_id_before_name():
         "realmId": 86901, "clientId": 86901, "game": "wow", "namespace": "eqwow-wow",
         "source": {"url": "http://50.6.248.85/dbviewer/?spell=86901", "confidence": "high"},
     }
-    capture = KnowledgeBundle.empty("capture")
-    capture.manifest["source"] = "Observed client"
-    capture.entities["capture:spell"] = {
-        "id": "capture:spell", "type": "spell", "name": "Localized Different Name",
+    realm = KnowledgeBundle.empty("realm")
+    realm.manifest["source"] = "Realm export"
+    realm.entities["realm:spell"] = {
+        "id": "realm:spell", "type": "spell", "name": "Localized Different Name",
         "realmId": 86901, "clientId": 86901, "game": "wow", "castTime": 6000,
-        "source": {"url": "capture://spell/86901", "confidence": "high"},
+        "source": {"url": "realm://spell/86901", "confidence": "high"},
     }
-    merged, report = merge_realm(base, capture)
-    assert report.matched == [("capture:spell", "eqwow:spell:86901")]
+    merged, report = merge_realm(base, realm)
+    assert report.matched == [("realm:spell", "eqwow:spell:86901")]
     assert merged.entities["eqwow:spell:86901"]["castTime"] == 6000
-    assert merged.entities["eqwow:spell:86901"]["fieldOrigins"]["castTime"] == "game-capture"
+    assert merged.entities["eqwow:spell:86901"]["fieldOrigins"]["castTime"] == "realm-export"
 
 
 def test_recursive_partition_has_no_duplicate_boundary(monkeypatch, tmp_path):
-    import norrathiq.eqwow as module
+    import updater.norrathiq.eqwow as module
     monkeypatch.setattr(module, "LIST_LIMIT", 4)
 
     class PartitionClient:

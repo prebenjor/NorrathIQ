@@ -5,6 +5,19 @@ NIQ:RegisterModule("Recommendation", Recommendation)
 
 local precedence = { K = 5, Q = 4, R = 3, T = 2, ["$"] = 1 }
 
+local function hasEntries(value)
+    return type(value) == "table" and next(value) ~= nil
+end
+
+local function hasRetainedUse(entity)
+    if not entity then return false end
+    if entity.flags and (entity.flags.K or entity.flags.Q or entity.flags.R or entity.flags.T) then return true end
+    for _, key in ipairs({ "uses", "quests", "turnins", "recipes", "components", "related", "rewards" }) do
+        if hasEntries(entity[key]) then return true end
+    end
+    return false
+end
+
 function Recommendation:PrimaryFlag(entity)
     local best, score = nil, 0
     for flag, enabled in pairs(entity and entity.flags or {}) do
@@ -21,14 +34,28 @@ function Recommendation:Evaluate(entity)
     if entity.flags and (entity.flags.Q or entity.flags.R or entity.flags.T) then
         return { action = "KEEP", reason = entity.recommendation and entity.recommendation.reason or "Known quest, research, or tradeskill use." }
     end
-    if entity.recommendation then return entity.recommendation end
-    if entity.vendorValue and entity.vendorValue > 0 and not entity.related and not entity.uses then
-        return { action = "VENDOR", reason = "Known vendor value and no retained use in the current knowledge graph." }
+    if hasEntries(entity.quests) or hasEntries(entity.turnins) then
+        return { action = "KEEP", reason = "Known quest relationship; verify the quest before discarding this item." }
     end
-    if entity.vendorValue == 0 and entity.verifiedNoUse then
+    if hasEntries(entity.recipes) or hasEntries(entity.components) or hasEntries(entity.uses) then
+        return { action = "KEEP", reason = "Known recipe, research, or tradeskill relationship." }
+    end
+    if hasEntries(entity.related) or hasEntries(entity.rewards) then
+        return { action = "REVIEW", reason = "This item has related knowledge records; review them before discarding it." }
+    end
+    if entity.recommendation and entity.recommendation.action ~= "VENDOR" and entity.recommendation.action ~= "DESTROY" then
+        return entity.recommendation
+    end
+    -- Destructive guidance is opt-in data, never inferred from a vendor price.
+    -- A full detail record must explicitly certify that no retained use exists.
+    if entity._detail and entity.verifiedNoUse == true and not hasRetainedUse(entity)
+        and entity.vendorValue and entity.vendorValue > 0 then
+        return { action = "VENDOR", reason = "Verified vendor value and explicitly verified to have no retained use." }
+    end
+    if entity._detail and entity.vendorValue == 0 and entity.verifiedNoUse == true and not hasRetainedUse(entity) then
         return { action = "DESTROY", reason = "Verified zero value and no known use." }
     end
-    return { action = "REVIEW", reason = "Insufficient evidence for a safe inventory decision." }
+    return { action = "REVIEW", reason = "No verified safe-discard decision is available." }
 end
 
 local slotMap = { HEAD = 1, NECK = 2, SHOULDER = 3, CHEST = 5, WAIST = 6, LEGS = 7, FEET = 8, WRIST = 9, HANDS = 10, FINGER = 11, TRINKET = 13, BACK = 15, MAINHAND = 16, OFFHAND = 17, RANGED = 18 }

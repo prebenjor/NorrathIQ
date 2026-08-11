@@ -468,25 +468,40 @@ class EqwowCache:
         seen: set[tuple[str, int]] = set()
         for kind, record_id in priority or []:
             row = self.db.execute(
-                "SELECT * FROM records WHERE snapshot_id=? AND kind=? AND record_id=? AND detail_verified=0",
+                "SELECT kind,record_id,name FROM records WHERE snapshot_id=? AND kind=? AND record_id=? AND detail_verified=0",
                 (snapshot_id, kind, int(record_id)),
             ).fetchone()
             if row:
                 rows.append(row)
                 seen.add((kind, int(record_id)))
         for row in self.db.execute(
-            "SELECT * FROM records WHERE snapshot_id=? AND detail_verified=0 ORDER BY kind,record_id", (snapshot_id,)
+            """SELECT kind,record_id,name FROM records WHERE snapshot_id=? AND detail_verified=0
+               ORDER BY CASE kind
+                   WHEN 'npc' THEN 0 WHEN 'item' THEN 1 WHEN 'quest' THEN 2
+                   WHEN 'object' THEN 3 WHEN 'spell' THEN 4 WHEN 'zone' THEN 5 ELSE 6 END,
+                   record_id""",
+            (snapshot_id,),
         ):
             key = (str(row["kind"]), int(row["record_id"]))
             if key not in seen:
                 rows.append(row)
         return rows
 
+    def pending_count(self, snapshot_id: str) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM records WHERE snapshot_id=? AND detail_verified=0",
+            (snapshot_id,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def status(self) -> SourceStatus:
         candidate = self.get_meta("candidate_snapshot")
         active = self.get_meta("active_snapshot")
         indexing = self.get_meta("indexing_snapshot")
-        selected = indexing or candidate or active
+        # A resumable index check can coexist with the last complete candidate.
+        # Report usable detail coverage for that complete snapshot, while exposing
+        # the in-progress snapshot separately through indexing_snapshot.
+        selected = candidate or active or indexing
         counts: dict[str, int] = {}
         detailed = total = 0
         warnings: list[str] = []
@@ -671,7 +686,7 @@ class EqwowSource:
             if limit is not None and completed >= limit:
                 break
             if progress:
-                progress(f"Downloading unlisted captured {kind} {record_id} by exact ID...")
+                progress(f"Downloading unlisted {kind} {record_id} by exact ID...")
             text, _ = self.client.get(source_url(kind, record_id))
             detail = parse_detail_page(kind, record_id, text)
             self.cache.put_indexes(snapshot, kind, [{"kind": kind, "id": int(record_id), "name": detail["name"], "fields": {"id": int(record_id), "unlisted": True}}])
@@ -690,9 +705,69 @@ class EqwowSource:
             detail = parse_detail_page(kind, record_id, text)
             self.cache.put_detail(snapshot, detail)
             completed += 1
-        remaining = len(self.cache.pending(snapshot))
+        remaining = self.cache.pending_count(snapshot)
         return completed, remaining
 
+    def crawl_zone(
+        self,
+        zone_id: int,
+        *,
+        snapshot_id: str | None = None,
+        max_records: int = 120,
+        progress: Callable[[str], None] | None = None,
+        should_pause: Callable[[], bool] | None = None,
+    ) -> tuple[int, int, int]:
+        """Download one zone page and its listed NPC/object detail pages."""
+        snapshot = snapshot_id or self.cache.get_meta("candidate_snapshot") or self.cache.get_meta("active_snapshot")
+        if not snapshot:
+            raise ValueError("No EQWOW index exists. Run Check now first.")
+        zone_id = int(zone_id)
+        row = self.cache.db.execute(
+            "SELECT detail_verified,detail_json,name FROM records WHERE snapshot_id=? AND kind='zone' AND record_id=?",
+            (snapshot, zone_id),
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Zone {zone_id} is not present in the current EQWOW index.")
+        downloaded = 0
+        if not row["detail_verified"]:
+            fetched, _ = self.crawl(
+                snapshot_id=snapshot, limit=1, priority=[("zone", zone_id)],
+                progress=progress, should_pause=should_pause,
+            )
+            downloaded += fetched
+            row = self.cache.db.execute(
+                "SELECT detail_verified,detail_json,name FROM records WHERE snapshot_id=? AND kind='zone' AND record_id=?",
+                (snapshot, zone_id),
+            ).fetchone()
+        if not row or not row["detail_json"]:
+            return downloaded, 0, 0
+        detail = json.loads(row["detail_json"])
+        targets: list[tuple[str, int]] = []
+        for view in detail.get("listviews", []):
+            template = str(view.get("template", "")).casefold()
+            if template not in {"npc", "object"}:
+                continue
+            for raw in view.get("data", []):
+                try:
+                    targets.append((template, int(raw["id"])))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        targets = list(dict.fromkeys(targets))
+        if targets and max_records > 0:
+            fetched, _ = self.crawl(
+                snapshot_id=snapshot, limit=min(int(max_records), len(targets)), priority=targets,
+                progress=progress, should_pause=should_pause,
+            )
+            downloaded += fetched
+        remaining = 0
+        for kind, record_id in targets:
+            target = self.cache.db.execute(
+                "SELECT detail_verified FROM records WHERE snapshot_id=? AND kind=? AND record_id=?",
+                (snapshot, kind, record_id),
+            ).fetchone()
+            if target and not target["detail_verified"]:
+                remaining += 1
+        return downloaded, len(targets), remaining
 
 def _entity_id(kind: str, record_id: int) -> str:
     return f"eqwow:{kind}:{int(record_id)}"
@@ -721,7 +796,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.1") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.7") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")
@@ -763,10 +838,12 @@ def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *
                 rows.append(row)
                 removed_keys.add(key)
     details: dict[tuple[str, int], dict[str, Any]] = {}
+    indexes: dict[tuple[str, int], dict[str, Any]] = {}
     for row in rows:
         index = json.loads(row["index_json"])
         detail = json.loads(row["detail_json"]) if row["detail_json"] else None
         kind, record_id = str(row["kind"]), int(row["record_id"])
+        indexes[(kind, record_id)] = index
         fields = index.get("fields", {})
         entity: dict[str, Any] = {
             "id": _entity_id(kind, record_id), "type": kind, "name": row["name"],
@@ -794,7 +871,9 @@ def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *
                 entity["fieldOrigins"]["summary"] = SOURCE_ID
             _enrich_detail_fields(entity, detail)
         bundle.entities[entity["id"]] = entity
+    _build_index_facts(bundle, indexes, snapshot, snap["checked_at"])
     _build_relations(bundle, details, snapshot, snap["checked_at"])
+    _build_zone_maps(bundle)
     return bundle
 
 
@@ -850,11 +929,156 @@ def _ensure_entity(bundle: KnowledgeBundle, kind: str, raw: dict[str, Any], snap
 
 def _edge(bundle: KnowledgeBundle, source: str, relation: str, target: str, provenance: dict[str, Any], **extra: Any) -> None:
     key = (source, relation, target)
-    if any((edge.get("from"), edge.get("relation"), edge.get("to")) == key for edge in bundle.edges):
+    edge_index = getattr(bundle, "_eqwow_edge_index", None)
+    if edge_index is None:
+        edge_index = {(edge.get("from"), edge.get("relation"), edge.get("to")): edge for edge in bundle.edges}
+        setattr(bundle, "_eqwow_edge_index", edge_index)
+    existing = edge_index.get(key)
+    if existing:
+        for field, value in extra.items():
+            if value is not None and (field not in existing or existing.get(field) is None):
+                existing[field] = value
         return
     record = {"id": f"eqwow-edge:{len(bundle.edges) + 1}", "from": source, "relation": relation, "to": target, "source": provenance, "confidence": "high"}
     record.update({key: value for key, value in extra.items() if value is not None})
     bundle.edges.append(record)
+    edge_index[key] = record
+
+
+def _zone_context(bundle: KnowledgeBundle, raw_zone_id: Any) -> tuple[int | None, str | None]:
+    try:
+        zone_id = int(raw_zone_id)
+    except (TypeError, ValueError):
+        return None, None
+    zone = bundle.entities.get(_entity_id("zone", zone_id), {})
+    name = sanitize_text(zone.get("name"))
+    return zone_id, name if name and name.casefold() != "undefined" else None
+
+
+def _add_source_zone(entity: dict[str, Any], zone_name: str | None) -> None:
+    if not zone_name:
+        return
+    zones = entity.setdefault("sourceZones", [])
+    if zone_name not in zones:
+        zones.append(zone_name)
+
+
+def _build_zone_maps(bundle: KnowledgeBundle) -> None:
+    member_counts: dict[str, int] = {}
+    pin_counts: dict[str, int] = {}
+    for edge in bundle.edges:
+        if edge.get("relation") == "LOCATED_IN":
+            zone_id = str(edge.get("to", ""))
+            member_counts[zone_id] = member_counts.get(zone_id, 0) + 1
+    for spawn in bundle.spawns:
+        zone_id = str(spawn.get("zone", ""))
+        pin_counts[zone_id] = pin_counts.get(zone_id, 0) + 1
+    zones: dict[str, Any] = {}
+    for entity in bundle.entities.values():
+        if entity.get("type") != "zone" or not entity.get("name"):
+            continue
+        entity_id = str(entity["id"])
+        zone_id = entity.get("realmId") or entity.get("clientId")
+        members = member_counts.get(entity_id, 0)
+        pins = pin_counts.get(entity_id, 0)
+        zones[entity["name"]] = {
+            "zoneId": zone_id,
+            "entity": entity_id,
+            "memberCount": members,
+            "pinCount": pins,
+            "source": entity.get("source", {}),
+            "note": (
+                f"EQWOW zone {zone_id} links {members:,} records. "
+                f"{pins:,} exact pin(s) are currently available from entity detail pages."
+            ),
+        }
+    bundle.maps = {"zones": zones}
+
+
+def _build_index_facts(
+    bundle: KnowledgeBundle,
+    indexes: dict[tuple[str, int], dict[str, Any]],
+    snapshot: str,
+    checked_at: str,
+) -> None:
+    """Compile acquisition and location facts already present in list indexes.
+
+    This gives the complete snapshot useful baseline coverage without waiting for
+    roughly two days of rate-limited detail requests. Detail pages later add exact
+    chances, quest prose, recipes, and map coordinates over the same edge keys.
+    """
+    for (kind, record_id), index in indexes.items():
+        entity = bundle.entities.get(_entity_id(kind, record_id))
+        if not entity:
+            continue
+        fields = index.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+        locations = fields.get("location") or []
+        if not isinstance(locations, list):
+            locations = [locations]
+        if kind == "quest" and not locations and fields.get("category") is not None:
+            locations = [fields.get("category")]
+        location_ids: list[int] = []
+        for raw_zone_id in locations:
+            zone_id, zone_name = _zone_context(bundle, raw_zone_id)
+            if zone_id is None:
+                continue
+            location_ids.append(zone_id)
+            _add_source_zone(entity, zone_name)
+        if location_ids:
+            entity["zoneIds"] = list(dict.fromkeys(location_ids))
+            entity["zoneId"] = location_ids[0]
+            if entity.get("sourceZones"):
+                entity["zone"] = entity["sourceZones"][0]
+            for zone_id in entity["zoneIds"]:
+                zone_entity = _entity_id("zone", zone_id)
+                if zone_entity in bundle.entities:
+                    _edge(bundle, entity["id"], "LOCATED_IN", zone_entity, entity["source"], confidence="medium", zoneId=zone_id)
+
+        if kind != "item":
+            continue
+        source_codes = set()
+        for value in fields.get("source") or []:
+            try:
+                source_codes.add(int(value))
+            except (TypeError, ValueError):
+                continue
+        provenance = entity["source"]
+        for raw in fields.get("sourcemore") or []:
+            if not isinstance(raw, dict):
+                continue
+            zone_id, zone_name = _zone_context(bundle, raw.get("z"))
+            _add_source_zone(entity, zone_name)
+            try:
+                target_type = int(raw.get("t"))
+                target_id = int(raw.get("ti"))
+            except (TypeError, ValueError):
+                continue
+            raw_target = {"id": target_id, "name": raw.get("n")}
+            if target_type == 1:
+                target = _ensure_entity(bundle, "npc", raw_target, snapshot, checked_at)
+                if not target:
+                    continue
+                if 2 in source_codes:
+                    _edge(bundle, entity["id"], "DROPPED_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+                if 5 in source_codes:
+                    _edge(bundle, entity["id"], "SOLD_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+            elif target_type in {2, 3} and 2 in source_codes:
+                target_kind = "object" if target_type == 2 else "item"
+                target = _ensure_entity(bundle, target_kind, raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, entity["id"], "DROPPED_BY", target, provenance, confidence="medium", zoneId=zone_id, zone=zone_name, container=True)
+            elif target_type == 5 and 4 in source_codes:
+                target = _ensure_entity(bundle, "quest", raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, target, "QUEST_REWARD", entity["id"], provenance, confidence="medium", zoneId=zone_id, zone=zone_name)
+            elif target_type == 6 and 1 in source_codes:
+                target = _ensure_entity(bundle, "spell", raw_target, snapshot, checked_at)
+                if target:
+                    _edge(bundle, entity["id"], "CRAFTED_BY", target, provenance, confidence="medium")
+        if len(entity.get("sourceZones", [])) == 1 and not entity.get("zone"):
+            entity["zone"] = entity["sourceZones"][0]
 
 
 def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dict[str, Any]], snapshot: str, checked_at: str) -> None:
@@ -871,7 +1095,26 @@ def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dic
                     target = _ensure_entity(bundle, "npc", raw, snapshot, checked_at)
                     if target:
                         locations = raw.get("location") or []
-                        _edge(bundle, source_id, "DROPPED_BY", target, provenance, dropChance=raw.get("percent"), zoneId=locations[0] if locations else None, minLevel=raw.get("minlevel"), maxLevel=raw.get("maxlevel"))
+                        zone_id = locations[0] if locations else None
+                        zone_name = None
+                        if zone_id is not None:
+                            zone = bundle.entities.get(_entity_id("zone", int(zone_id)), {})
+                            if str(zone.get("name", "")).casefold() != "undefined":
+                                zone_name = zone.get("name")
+                            npc = bundle.entities.get(target, {})
+                            npc["zoneId"] = int(zone_id)
+                            if zone_name:
+                                npc["zone"] = zone_name
+                        npc = bundle.entities.get(target, {})
+                        if raw.get("minlevel") is not None:
+                            npc["minLevel"] = raw.get("minlevel")
+                        if raw.get("maxlevel") is not None:
+                            npc["maxLevel"] = raw.get("maxlevel")
+                        _edge(
+                            bundle, source_id, "DROPPED_BY", target, provenance,
+                            dropChance=raw.get("percent"), zoneId=zone_id, zone=zone_name,
+                            minLevel=raw.get("minlevel"), maxLevel=raw.get("maxlevel"),
+                        )
                 elif kind == "item" and template == "npc" and any(word in view_id for word in ("sold", "vendor", "merchant")):
                     target = _ensure_entity(bundle, "npc", raw, snapshot, checked_at)
                     if target:
@@ -917,12 +1160,28 @@ def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dic
                     target = _ensure_entity(bundle, "spell", raw, snapshot, checked_at)
                     if target:
                         _edge(bundle, source_id, "CRAFTED_BY", target, provenance)
-                elif template in KINDS:
+                elif template in KINDS and any(word in view_id for word in ("related", "companion")):
                     target = _ensure_entity(bundle, template, raw, snapshot, checked_at)
                     if target:
                         _edge(bundle, source_id, "RELATED_TO", target, provenance)
+                if kind == "zone" and template in KINDS and template != "zone":
+                    target = _ensure_entity(bundle, template, raw, snapshot, checked_at)
+                    zone = bundle.entities[source_id]
+                    member = target and bundle.entities.get(target)
+                    if member:
+                        zone_name = zone.get("name")
+                        member["zoneId"] = record_id
+                        member["zone"] = zone_name
+                        zone_ids = member.setdefault("zoneIds", [])
+                        if record_id not in zone_ids:
+                            zone_ids.append(record_id)
+                        _add_source_zone(member, zone_name)
+                        _edge(
+                            bundle, target, "LOCATED_IN", source_id, provenance,
+                            confidence="high", zoneId=record_id, zone=zone_name, viaZonePage=True,
+                        )
         mapper = detail.get("mapper", {})
-        if kind == "npc" and isinstance(mapper, dict):
+        if kind in {"npc", "object"} and isinstance(mapper, dict):
             for zone_id, pins in mapper.items():
                 try:
                     zone_num = int(zone_id)
@@ -970,7 +1229,7 @@ def review_text(diff: SourceDiff, limit: int = 200) -> str:
 
 
 def merge_p99_fallback(primary: KnowledgeBundle, reference: KnowledgeBundle) -> KnowledgeBundle:
-    """Copy only absent descriptive prose; never replace EQWOW or captured fields."""
+    """Copy only absent descriptive prose; never replace EQWOW fields."""
     from copy import deepcopy
     from .normalize import normalize_name
 
@@ -1000,15 +1259,11 @@ def apply_candidate_update(
     compiled_output: str | Path,
     wow_or_addons: str | Path,
     *,
-    capture_file: str | Path | None = None,
     p99_reference: str | Path | None = None,
     force_reviewed: bool = False,
 ) -> tuple[str, KnowledgeBundle]:
-    from .capture import import_capture
-    from .auto_update import choose_realm
     from .compiler import compile_bundle
     from .installer import install_addons
-    from .realm import merge_realm
     from .validate import validate_bundle
 
     snapshot = cache.get_meta("candidate_snapshot")
@@ -1020,10 +1275,6 @@ def apply_candidate_update(
     bundle = build_bundle_from_cache(cache, snapshot)
     if p99_reference and (Path(p99_reference) / "manifest.json").is_file():
         bundle = merge_p99_fallback(bundle, KnowledgeBundle.load(p99_reference))
-    if capture_file and Path(capture_file).is_file():
-        captured = import_capture(capture_file, realm_name=choose_realm(capture_file))
-        bundle, _ = merge_realm(bundle, captured)
-        bundle.manifest["captureTimestamp"] = captured.manifest.get("generatedAt", "")
     errors = [issue for issue in validate_bundle(bundle) if issue.level == "error"]
     if errors:
         raise ValueError("Candidate validation failed: " + "; ".join(str(issue) for issue in errors[:10]))

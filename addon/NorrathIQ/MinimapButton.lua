@@ -58,13 +58,7 @@ function MinimapButton:Initialize()
     button.border = border
     button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
 
-    button:SetScript("OnClick", function(_, mouseButton)
-        if mouseButton == "RightButton" then
-            if NIQ.Capture then NIQ:Print("Capture " .. NIQ.Capture:Status()) end
-        else
-            MinimapButton:ToggleJournal()
-        end
-    end)
+    button:SetScript("OnClick", function() MinimapButton:ToggleJournal() end)
     button:SetScript("OnDragStart", function(self)
         self.dragging = true
         self:SetScript("OnUpdate", function() MinimapButton:UpdateDragPosition() end)
@@ -76,8 +70,7 @@ function MinimapButton:Initialize()
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("NorrathIQ", 0.4, 0.9, 0.82)
-        GameTooltip:AddLine("Left-click: open or close the knowledge journal", 1, 1, 1)
-        GameTooltip:AddLine("Right-click: show capture status", 0.75, 0.75, 0.75)
+        GameTooltip:AddLine("Click: open or close the knowledge journal", 1, 1, 1)
         GameTooltip:AddLine("Drag: move around the minimap", 0.75, 0.75, 0.75)
         GameTooltip:Show()
     end)

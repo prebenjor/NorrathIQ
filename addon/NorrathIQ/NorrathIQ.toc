@@ -2,8 +2,8 @@
 ## Title: NorrathIQ
 ## Notes: Offline EverQuest knowledge, inventory guidance, quest help, and maps.
 ## Author: NorrathIQ contributors
-## Version: 1.3.1
-## SavedVariables: NorrathIQDB, NorrathIQCaptureDB
+## Version: 1.3.7
+## SavedVariables: NorrathIQDB
 ## SavedVariablesPerCharacter: NorrathIQCharDB
 
 Core.lua
@@ -12,7 +12,6 @@ Data.lua
 Recommendation.lua
 Search.lua
 Map.lua
-Capture.lua
 Tooltip.lua
 Inventory.lua
 Quest.lua

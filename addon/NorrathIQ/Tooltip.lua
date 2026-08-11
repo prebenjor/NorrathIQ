@@ -68,11 +68,8 @@ function Tooltip:Decorate(tooltip)
         tooltip._niqDecorating = nil
         return
     end
-    if NIQ.Capture then
-        NIQ.Capture:ObserveItem(link, "tooltip")
-    end
     -- Tooltip hovers must never load or queue an offline data shard. They use
-    -- the captured overlay and any knowledge already resident in memory.
+    -- only knowledge already resident in memory.
     local entity, status = NIQ.Data:ResolveExact(name, false, false)
     if status == "ambiguous" then
         tooltip:AddLine(" ")
@@ -91,19 +88,24 @@ function Tooltip:Decorate(tooltip)
     if entity.summary then tooltip:AddLine(entity.summary, 0.88, 0.88, 0.88, true) end
     addList(tooltip, "Used for", entity.uses)
     addList(tooltip, "Dropped by", entity.drops, function(drop)
-        local level = drop.level and " (" .. drop.level .. ")" or ""
-        local observed = ""
-        if drop.observedCount and drop.observedWindows and drop.observedWindows > 0 then
-            observed = string.format(" — observed %d/%d loot windows", drop.observedCount, drop.observedWindows)
+        local levelText = drop.level
+        if not levelText and (drop.minLevel or drop.maxLevel) then
+            if drop.minLevel and drop.maxLevel and drop.minLevel == drop.maxLevel then
+                levelText = tostring(drop.minLevel)
+            else
+                levelText = tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?")
+            end
         end
-        return drop.npc .. level .. " — " .. (drop.zone or "unknown zone") .. observed
+        local level = levelText and " (level " .. levelText .. ")" or ""
+        return drop.npc .. level .. " — " .. (drop.zone or "unknown zone")
     end)
+    addList(tooltip, "Known source zones", entity.sourceZones, function(zone) return tostring(zone) end)
     addList(tooltip, "Related", NIQ.Data:GetRelations(entity, false), function(related)
         return related.name .. " [" .. related.type .. "]"
     end, 4)
     local recommendation = NIQ.Recommendation:Evaluate(entity)
     local color = colors[recommendation.action] or colors.REVIEW
-    tooltip:AddLine("Recommendation: " .. recommendation.action, color[1], color[2], color[3])
+    tooltip:AddLine("Inventory guidance: " .. recommendation.action, color[1], color[2], color[3])
     tooltip:AddLine(recommendation.reason, 0.82, 0.82, 0.82, true)
     local comparison = NIQ.Recommendation:CompareEquipped(entity)
     if comparison then
@@ -111,7 +113,7 @@ function Tooltip:Decorate(tooltip)
         tooltip:AddLine(comparison.details, 0.72, 0.72, 0.72, true)
     end
     if NIQ.db.showConfidence and entity.source then
-        local label = entity.source.name or entity.source.sourceId or "local capture"
+        local label = entity.source.name or entity.source.sourceId or "unknown source"
         local record = entity.source.recordId and " #" .. tostring(entity.source.recordId) or ""
         local snapshot = entity.source.snapshotDate and " - " .. tostring(entity.source.snapshotDate) or ""
         tooltip:AddLine("Source: " .. label .. record .. snapshot, 0.55, 0.65, 0.65)

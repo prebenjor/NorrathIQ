@@ -5,7 +5,6 @@ import os
 import sqlite3
 import sys
 import threading
-import time
 import tkinter as tk
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,8 +21,6 @@ PREFERRED_ADDONS_TARGET = Path(os.environ.get(
 ))
 
 try:
-    from .auto_update import capture_signature, choose_realm, find_capture_file, process_capture_update
-    from .capture import import_capture
     from .classic import refresh_classic_knowledge
     from .compiler import compile_bundle
     from .eqwow import EqwowCache, EqwowSource, apply_candidate_update, review_text
@@ -31,12 +28,9 @@ try:
     from .graph import build_bundle
     from .models import KnowledgeBundle
     from .p99 import MediaWikiClient
-    from .realm import merge_realm
     from .release import update_from_release
     from .validate import validate_bundle
 except ImportError:  # Allows direct execution by PyInstaller.
-    from norrathiq.auto_update import capture_signature, choose_realm, find_capture_file, process_capture_update
-    from norrathiq.capture import import_capture
     from norrathiq.classic import refresh_classic_knowledge
     from norrathiq.compiler import compile_bundle
     from norrathiq.eqwow import EqwowCache, EqwowSource, apply_candidate_update, review_text
@@ -44,7 +38,6 @@ except ImportError:  # Allows direct execution by PyInstaller.
     from norrathiq.graph import build_bundle
     from norrathiq.models import KnowledgeBundle
     from norrathiq.p99 import MediaWikiClient
-    from norrathiq.realm import merge_realm
     from norrathiq.release import update_from_release
     from norrathiq.validate import validate_bundle
 
@@ -83,30 +76,22 @@ class UpdaterApp(tk.Tk):
         self.minsize(840, 640)
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.operation_running = False
-        self.capture_pending_since: float | None = None
-        self.last_capture_signature = None
         self.last_wow_running = wow_is_running()
         self.wow_path = tk.StringVar(value=default_wow_path())
         self.source_path = tk.StringVar(value=default_source_path())
         self.bundle_path = tk.StringVar(value=self._default_bundle_path())
         self.release_url = tk.StringVar()
-        self.auto_capture = tk.BooleanVar(value=True)
         self.use_p99_reference = tk.BooleanVar(value=False)
         self.advanced_visible = False
         self.eqwow_status = tk.StringVar(value="Not checked yet")
-        self.capture_status = tk.StringVar(value="Waiting for captured game observations")
         self.p99_status = tk.StringVar(value="Optional descriptive reference (advanced)")
         self.crawl_pause = threading.Event()
         self.crawl_running = False
         self.status = tk.StringVar(value="Ready. Start with step 1 below.")
-        try:
-            self.last_capture_signature = capture_signature(find_capture_file(self.wow_path.get()))
-        except (OSError, ValueError):
-            pass
         self._build()
         self._refresh_source_status()
         self.after(100, self._poll)
-        self.after(2000, self._watch_capture)
+        self.after(2000, self._watch_staged_update)
         self.after(5000, self._automatic_source_check)
 
     @staticmethod
@@ -143,7 +128,7 @@ class UpdaterApp(tk.Tk):
         root = ttk.Frame(self, padding=14)
         root.pack(fill="both", expand=True)
         ttk.Label(root, text="NorrathIQ", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-        ttk.Label(root, text="Install the addon and process captured game knowledge without managing files.").grid(
+        ttk.Label(root, text="Install the addon and keep its offline EQWOW knowledge current.").grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(0, 12)
         )
 
@@ -160,23 +145,14 @@ class UpdaterApp(tk.Tk):
         ttk.Label(eqwow, text="Unverified HTTP source: fingerprints detect changes but cannot prove who sent them.", foreground="#9a5b18").grid(row=1, column=0, columnspan=4, sticky="w", pady=(3, 8))
         ttk.Button(eqwow, text="Check now", command=self._check_eqwow).grid(row=2, column=0, padx=(0, 6))
         ttk.Button(eqwow, text="Review changes", command=self._review_eqwow).grid(row=2, column=1, padx=6)
-        self.crawl_button = ttk.Button(eqwow, text="Continue detail download", command=self._continue_eqwow)
+        self.crawl_button = ttk.Button(eqwow, text="Complete all database details", command=self._continue_eqwow)
         self.crawl_button.grid(row=2, column=2, padx=6)
         ttk.Button(eqwow, text="Apply validated update", command=self._apply_eqwow).grid(row=2, column=3, padx=6)
-
-        capture_card = ttk.LabelFrame(normal, text="Game capture — AUTHORITATIVE REALM OVERLAY", padding=10)
-        capture_card.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        ttk.Label(capture_card, textvariable=self.capture_status, wraplength=810).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Button(capture_card, text="Process captured data now", command=self._process_capture, width=28).grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 10))
-        ttk.Label(capture_card, text="In WoW: /niq capture on — then play normally and /reload or log out.").grid(row=1, column=1, sticky="w", pady=(8, 0))
-        ttk.Checkbutton(
-            capture_card,
-            text="Automatically process new capture data while this updater remains open",
-            variable=self.auto_capture,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Button(eqwow, text="Download one zone map", command=self._download_zone).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(eqwow, text="Enter an EQWOW zone ID, then Apply validated update when it finishes.").grid(row=3, column=1, columnspan=3, sticky="e", pady=(8, 0))
 
         p99_card = ttk.LabelFrame(normal, text="Project 1999 Wiki — OPTIONAL REFERENCE", padding=10)
-        p99_card.grid(row=3, column=0, columnspan=2, sticky="ew")
+        p99_card.grid(row=2, column=0, columnspan=2, sticky="ew")
         ttk.Label(p99_card, textvariable=self.p99_status, wraplength=810).grid(row=0, column=0, sticky="w")
         ttk.Button(p99_card, text="Update optional P99 prose", command=self._refresh_classic).grid(row=0, column=1, sticky="e", padx=(10, 0))
         ttk.Checkbutton(p99_card, text="Use P99 prose only when EQWOW has no description", variable=self.use_p99_reference).grid(row=1, column=0, columnspan=2, sticky="w", pady=(5, 0))
@@ -197,7 +173,6 @@ class UpdaterApp(tk.Tk):
         ttk.Button(actions, text="Apply staged update", command=self._apply_staged).pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="Update from manifest", command=self._release).pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="Validate bundle", command=self._validate).pack(side="left", padx=(0, 6))
-        ttk.Button(actions, text="Manual capture import", command=self._import_capture).pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="Compile bundle", command=self._compile_bundle).pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="P99 refresh...", command=self._advanced_refresh).pack(side="left")
         self.advanced.columnconfigure(1, weight=1)
@@ -264,7 +239,7 @@ class UpdaterApp(tk.Tk):
                     self.operation_running = False
                     self.crawl_running = False
                     if hasattr(self, "crawl_button"):
-                        self.crawl_button.configure(text="Continue detail download")
+                        self.crawl_button.configure(text="Complete all database details")
                     text = getattr(value, "message", None) or str(value)
                     self.status.set(text)
                     self._append(text)
@@ -273,7 +248,7 @@ class UpdaterApp(tk.Tk):
                     self.operation_running = False
                     self.crawl_running = False
                     if hasattr(self, "crawl_button"):
-                        self.crawl_button.configure(text="Continue detail download")
+                        self.crawl_button.configure(text="Complete all database details")
                     self.status.set(f"Failed: {value}")
                     self._append(f"ERROR: {value}")
                     messagebox.showerror("NorrathIQ updater", str(value))
@@ -304,23 +279,16 @@ class UpdaterApp(tk.Tk):
             )
             if value.total and value.detailed < value.total:
                 state += " — Detail crawl incomplete"
+            remaining = max(0, value.total - value.detailed)
+            minimum_hours = remaining / 3600
             self.eqwow_status.set(
                 f"{state}. Installed: {value.active_snapshot or 'none'}; candidate: {value.candidate_snapshot or 'none'}; "
                 f"indexing: {value.indexing_snapshot or 'idle'}; last check: {value.checked_at or 'never'}; "
-                f"{counts}; details {value.detailed:,}/{value.total:,}."
+                f"{counts}; details {value.detailed:,}/{value.total:,}; "
+                f"minimum remaining time at the safe source rate: {minimum_hours:.1f} hours."
             )
         except (OSError, ValueError, sqlite3.Error) as exc:
             self.eqwow_status.set(f"Source cache needs attention: {exc}")
-        try:
-            capture = find_capture_file(self.wow_path.get())
-            if capture:
-                changed = datetime.fromtimestamp(capture.stat().st_mtime, timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M")
-                self.capture_status.set(f"Capture found: {capture.name}; last saved {changed}. Captured IDs override matching EQWOW fields.")
-            else:
-                self.capture_status.set("No capture file found yet. Enable capture in WoW, then /reload or log out once.")
-        except (OSError, ValueError):
-            self.capture_status.set("Capture location is unavailable until the WoW/AddOns folder is valid.")
-
     def _automatic_source_check(self) -> None:
         try:
             with EqwowCache(self._eqwow_cache_path()) as cache:
@@ -371,26 +339,45 @@ class UpdaterApp(tk.Tk):
         self.crawl_button.configure(text="Pause after current record")
 
         def operation() -> str:
+            reported = 0
+
+            def report(message: str) -> None:
+                nonlocal reported
+                reported += 1
+                if reported == 1 or reported % 25 == 0:
+                    self.events.put(("log", message + f" ({reported:,} processed this run)"))
+
             priority = [("item", 95750), ("npc", 45603), ("spell", 86901), ("spell", 8921)]
-            capture_file = find_capture_file(self.wow_path.get())
-            if capture_file:
-                try:
-                    captured = import_capture(capture_file, realm_name=choose_realm(capture_file))
-                    for entity in captured.entities.values():
-                        kind, record_id = entity.get("type"), entity.get("realmId") or entity.get("clientId")
-                        if kind in {"item", "npc", "quest", "spell", "zone", "object"} and record_id is not None:
-                            priority.append((kind, int(record_id)))
-                except (OSError, TypeError, ValueError):
-                    pass
-            priority = list(dict.fromkeys(priority))
             with EqwowCache(self._eqwow_cache_path()) as cache:
                 downloaded, remaining = EqwowSource(cache).crawl(
                     priority=priority,
-                    progress=lambda message: self.events.put(("log", message)),
+                    progress=report,
                     should_pause=self.crawl_pause.is_set,
                 )
             return f"Downloaded {downloaded:,} EQWOW detail records; {remaining:,} remain. Progress is saved and resumes here."
-        self._run("Continuing the resumable EQWOW detail download...", operation)
+        self._run("Completing all EQWOW details. NPC locations are prioritized; progress is checkpointed...", operation)
+
+    def _download_zone(self) -> None:
+        zone_id = simpledialog.askinteger(
+            "Download EQWOW zone map",
+            "EQWOW zone ID (for example, 5218 for Estate of Unrest):",
+            parent=self, minvalue=1,
+        )
+        if zone_id is None:
+            return
+
+        def operation() -> str:
+            with EqwowCache(self._eqwow_cache_path()) as cache:
+                downloaded, targets, remaining = EqwowSource(cache).crawl_zone(
+                    zone_id,
+                    progress=lambda message: self.events.put(("log", message)),
+                )
+            return (
+                f"Zone {zone_id}: downloaded {downloaded:,} detail pages for {targets:,} listed NPC/object records; "
+                f"{remaining:,} remain. Click Apply validated update to install the improved map."
+            )
+
+        self._run(f"Downloading zone {zone_id} and its exact NPC/object locations...", operation)
 
     def _apply_eqwow(self) -> None:
         try:
@@ -405,7 +392,7 @@ class UpdaterApp(tk.Tk):
             f"Apply EQWOW snapshot {diff.candidate_snapshot}?\n\n"
             f"Added {len(diff.added):,}, changed {len(diff.changed):,}, missing {len(diff.removed):,}.\n"
             f"Detail download: {source_status.detailed:,}/{source_status.total:,}."
-            f"{warning}\n\nYour newest game capture will be reapplied automatically."
+            f"{warning}"
         )
         if diff.quarantined:
             messagebox.showwarning("Review required", message + "\n\nOpen Review changes. A quarantined update requires the CLI's explicit reviewed override.")
@@ -414,14 +401,12 @@ class UpdaterApp(tk.Tk):
             return
         work = self._eqwow_work_root()
         portable, compiled = work / "bundle", work / "compiled"
-        capture_file = find_capture_file(self.wow_path.get())
         p99 = self._p99_reference_path() if self.use_p99_reference.get() else None
 
         def operation() -> str:
             with EqwowCache(self._eqwow_cache_path()) as cache:
                 result, bundle = apply_candidate_update(
                     cache, portable, compiled, self.wow_path.get(),
-                    capture_file=capture_file,
                     p99_reference=p99,
                 )
             self.events.put(("set_bundle", str(portable)))
@@ -461,42 +446,8 @@ class UpdaterApp(tk.Tk):
             return f"Validation finished: {len(bundle.entities)} entities, {len(bundle.edges)} edges, {errors} error(s)."
         self._run("Validating portable knowledge bundle...", operation)
 
-    def _process_capture(self, automatic: bool = False) -> None:
+    def _watch_staged_update(self) -> None:
         try:
-            capture_file = find_capture_file(self.wow_path.get())
-        except (OSError, ValueError) as exc:
-            if automatic:
-                self._append(f"Automatic capture check skipped: {exc}")
-            else:
-                messagebox.showerror("NorrathIQ updater", str(exc))
-            return
-        if not capture_file:
-            message = "No capture file was found. In WoW, run /niq capture on and then /reload or log out."
-            if automatic:
-                self._append(message)
-            else:
-                messagebox.showinfo("NorrathIQ updater", message)
-            return
-        base_bundle = Path(self.bundle_path.get())
-        work_root = PREFERRED_RELEASE_SOURCE.parent / "NorrathIQ-auto"
-        self._run(
-            "Automatically checking and installing captured game data..." if automatic else "Checking and installing captured game data...",
-            lambda: process_capture_update(capture_file, base_bundle, work_root, self.wow_path.get()),
-        )
-
-    def _watch_capture(self) -> None:
-        try:
-            capture_file = find_capture_file(self.wow_path.get())
-            signature = capture_signature(capture_file)
-            if self.auto_capture.get() and signature != self.last_capture_signature:
-                self.last_capture_signature = signature
-                self.capture_pending_since = time.monotonic()
-                if signature:
-                    self.status.set("New game capture detected; waiting for WoW to finish saving...")
-            if (self.auto_capture.get() and self.capture_pending_since is not None
-                    and time.monotonic() - self.capture_pending_since >= 3 and not self.operation_running):
-                self.capture_pending_since = None
-                self._process_capture(automatic=True)
             running = wow_is_running()
             if self.last_wow_running and not running and not self.operation_running:
                 staged = Path(self.wow_path.get()) / ".NorrathIQ-staged"
@@ -504,45 +455,9 @@ class UpdaterApp(tk.Tk):
                     self._apply_staged()
             self.last_wow_running = running
         except (OSError, ValueError) as exc:
-            self._append(f"Automatic capture watcher: {exc}")
+            self._append(f"Staged update watcher: {exc}")
         finally:
-            self.after(2000, self._watch_capture)
-
-    def _import_capture(self) -> None:
-        base_path = self.bundle_path.get().strip()
-        capture_file = filedialog.askopenfilename(
-            title="Choose NorrathIQ SavedVariables file",
-            filetypes=[("WoW SavedVariables", "*.lua"), ("All files", "*.*")],
-        )
-        if not capture_file:
-            return
-        realm = simpledialog.askstring(
-            "Captured realm",
-            "Realm name (leave blank if this file contains only one realm):",
-            parent=self,
-        )
-        if realm is None:
-            return
-        output = filedialog.askdirectory(title="Choose output folder for the captured realm bundle")
-        if not output:
-            return
-        self.bundle_path.set(output)
-
-        def operation() -> str:
-            captured = import_capture(Path(capture_file), realm_name=realm.strip() or None)
-            bundle = captured
-            merge_note = ""
-            if base_path and (Path(base_path) / "manifest.json").is_file():
-                bundle, report = merge_realm(KnowledgeBundle.load(Path(base_path)), captured)
-                merge_note = f" Matched {len(report.matched)} records to the selected knowledge bundle; kept {len(report.unmatched)} new records."
-            issues = validate_bundle(bundle)
-            errors = [issue for issue in issues if issue.level == "error"]
-            if errors:
-                raise ValueError("Capture validation failed: " + "; ".join(str(issue) for issue in errors[:5]))
-            bundle.write(Path(output))
-            return f"Wrote {len(bundle.entities)} entities and {len(bundle.edges)} relationships to {output}.{merge_note}"
-
-        self._run("Importing local game observations...", operation)
+            self.after(2000, self._watch_staged_update)
 
     def _compile_bundle(self) -> None:
         bundle_path = self.bundle_path.get().strip()

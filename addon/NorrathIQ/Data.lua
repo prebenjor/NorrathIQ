@@ -44,15 +44,6 @@ local function loadAddon(name)
     return true
 end
 
-local function removeIndexedId(index, key, id)
-    local values = key and index[key]
-    if not values then return end
-    for position = #values, 1, -1 do
-        if values[position] == id then table.remove(values, position) end
-    end
-    if #values == 0 then index[key] = nil end
-end
-
 local function insertIndexedId(index, key, id)
     if not key or key == "" then return end
     local values = index[key]
@@ -64,52 +55,6 @@ local function insertIndexedId(index, key, id)
         if existingId == id then return end
     end
     table.insert(values, id)
-end
-
--- Apply a single captured record without walking every loaded data pack. This
--- is the normal path for bag, loot, target, and quest discovery.
-function Data:ApplyOverlay(id, overlay)
-    if not id or not overlay or not overlay.name then return false end
-    self.entities = self.entities or {}
-    self.exact = self.exact or {}
-    self.aliases = self.aliases or {}
-    self.questIds = self.questIds or {}
-
-    local existing = self.entities[id]
-    if existing then
-        removeIndexedId(self.exact, NIQ:Normalize(existing.name), id)
-        for _, alias in ipairs(existing.aliases or {}) do
-            removeIndexedId(self.aliases, NIQ:Normalize(alias), id)
-        end
-        if existing.type == "quest" or overlay.type == "quest" then
-            for questId, entityId in pairs(self.questIds) do
-                if entityId == id then self.questIds[questId] = nil end
-            end
-        end
-    end
-
-    local merged = {}
-    for key, value in pairs(existing or {}) do merged[key] = value end
-    for key, value in pairs(overlay) do merged[key] = value end
-    if existing then
-        merged._detail = existing._detail
-        merged.detailPack = existing.detailPack or merged.detailPack
-    end
-    merged.id = id
-    merged._overlay = nil
-    self.entities[id] = merged
-
-    insertIndexedId(self.exact, NIQ:Normalize(merged.name), id)
-    for _, alias in ipairs(merged.aliases or {}) do
-        insertIndexedId(self.aliases, NIQ:Normalize(alias), id)
-    end
-    if merged.type == "quest" and (merged.questId or merged.clientId) then
-        local questId = merged.questId or merged.clientId
-        self.questIds[tonumber(questId) or questId] = id
-    end
-    if not existing then self.entityCount = (self.entityCount or 0) + 1 end
-    self.revision = (self.revision or 0) + 1
-    return true
 end
 
 function Data:LoadExternalPacks(query)
@@ -171,7 +116,7 @@ end
 
 function Data:Rebuild()
     self.entities, self.exact, self.aliases, self.questIds, self.zones, self.spawns = {}, {}, {}, {}, {}, {}
-    local detailPacks, detailHashPacks, overlays = {}, {}, {}
+    local detailPacks, detailHashPacks = {}, {}
     self.externalTotal = nil
     for _, pack in pairs(NIQ.dataPacks) do
         for key, value in pairs(pack.meta and pack.meta.detailPacks or {}) do detailPacks[tostring(key)] = value end
@@ -194,28 +139,11 @@ function Data:Rebuild()
                 entity.detailPack = (pack.meta and pack.meta.detailPacks and pack.meta.detailPacks[tostring(entity.p)])
                     or detailPacks[tostring(entity.p)]
             end
-            if entity._overlay then
-                local previous = overlays[id]
-                if not previous or (entity._priority or 0) >= (previous._priority or 0) then overlays[id] = entity end
-            else
-                local existing = self.entities[id]
-                if not existing or entity._detail or not existing._detail then self.entities[id] = entity end
-            end
+            local existing = self.entities[id]
+            if not existing or entity._detail or not existing._detail then self.entities[id] = entity end
         end
         for zone, value in pairs(pack.zones or {}) do self.zones[zone] = value end
         for id, value in pairs(pack.spawns or {}) do self.spawns[id] = value end
-    end
-    for id, overlay in pairs(overlays) do
-        local existing = self.entities[id]
-        local merged = {}
-        for key, value in pairs(existing or {}) do merged[key] = value end
-        for key, value in pairs(overlay) do merged[key] = value end
-        if existing then
-            merged._detail = existing._detail
-            merged.detailPack = existing.detailPack or merged.detailPack
-        end
-        merged._overlay = nil
-        self.entities[id] = merged
     end
     local entityCount = 0
     for id, entity in pairs(self.entities) do
@@ -305,7 +233,7 @@ function Data:GetRelations(entity, loadDetails)
     if type(entity) == "string" then entity = self.entities[entity] end
     if loadDetails ~= false then entity = self:EnsureEntityDetail(entity) end
     if not entity then return {} end
-    local keys = { "related", "quests", "turnins", "recipes", "components", "vendors", "trainers", "givers" }
+    local keys = { "related", "quests", "turnins", "recipes", "components", "vendors", "trainers", "givers", "locations", "contents" }
     local seen, output = {}, {}
     for _, key in ipairs(keys) do
         for _, id in ipairs(entity[key] or {}) do

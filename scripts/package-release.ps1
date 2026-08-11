@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.3.1"
+    [string]$Version = "1.3.7"
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,7 +17,6 @@ try {
     New-Item -ItemType Directory -Path $Stage | Out-Null
     Copy-Item -LiteralPath (Join-Path $Root "addon\NorrathIQ") -Destination $Stage -Recurse
     Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $Stage "README.md")
-    Copy-Item -LiteralPath (Join-Path $Root "docs\CAPTURE.md") -Destination (Join-Path $Stage "CAPTURE.md")
     $PortableData = Join-Path $Stage "PortableData"
     New-Item -ItemType Directory -Path $PortableData | Out-Null
     Copy-Item -LiteralPath (Join-Path $Root "data\seed") -Destination (Join-Path $PortableData "seed") -Recurse
@@ -57,7 +56,6 @@ try {
     $UpdaterBuild = Join-Path $Root "updater\dist\NorrathIQUpdater"
     if (Test-Path -LiteralPath $UpdaterBuild) {
         Copy-Item -LiteralPath (Join-Path $Root "README.md") -Destination (Join-Path $UpdaterBuild "README.md") -Force
-        Copy-Item -LiteralPath (Join-Path $Root "docs\CAPTURE.md") -Destination (Join-Path $UpdaterBuild "CAPTURE.md") -Force
         $UpdaterPortableData = Join-Path $UpdaterBuild "PortableData"
         if (Test-Path -LiteralPath $UpdaterPortableData) {
             Remove-Item -LiteralPath $UpdaterPortableData -Recurse -Force

@@ -4,7 +4,7 @@ NorrathIQ = NorrathIQ or {}
 local NIQ = NorrathIQ
 
 NIQ.name = ADDON_NAME or "NorrathIQ"
-NIQ.version = "1.3.1"
+NIQ.version = "1.3.7"
 NIQ.schemaVersion = 1
 NIQ.modules = NIQ.modules or {}
 NIQ.moduleOrder = NIQ.moduleOrder or {}
@@ -33,7 +33,6 @@ local accountDefaults = {
     showBagBadges = true,
     showQuestHelper = true,
     showConfidence = true,
-    liveDiscovery = true,
     atlasScale = 1,
     searchFilter = "all",
     minimap = { hidden = false, angle = 220 },
@@ -139,14 +138,13 @@ function NIQ:Initialize()
 end
 
 function NIQ:GetSourceVersions()
-    local eqwow, capture, p99 = "none", "none", "disabled"
+    local eqwow, p99 = "none", "disabled"
     for _, pack in pairs(self.dataPacks or {}) do
         local meta = pack.meta or {}
         if meta.eqwowSnapshot and meta.eqwowSnapshot ~= "" then eqwow = meta.eqwowSnapshot end
-        if meta.captureTimestamp and meta.captureTimestamp ~= "" then capture = meta.captureTimestamp end
         if meta.p99ReferenceVersion and meta.p99ReferenceVersion ~= "" then p99 = meta.p99ReferenceVersion end
     end
-    return eqwow, capture, p99
+    return eqwow, p99
 end
 
 function NIQ:DispatchEvent(event, ...)
@@ -168,12 +166,7 @@ eventFrame:RegisterEvent("QUEST_LOG_UPDATE")
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
         local loaded = ...
-        if loaded == NIQ.name then
-            NIQ:Initialize()
-            if not NIQ.Capture then
-                NIQ:Print("Capture module is missing. Reinstall the complete NorrathIQ core folder; data packs alone cannot add capture support.")
-            end
-        end
+        if loaded == NIQ.name then NIQ:Initialize() end
     end
     if NIQ.initialized then NIQ:DispatchEvent(event, ...) end
 end)
@@ -191,27 +184,12 @@ SlashCmdList.NORRATHIQ = function(message)
         NIQ:Print("Bag badges refreshed.")
     elseif command == "quest" and NIQ.Quest then
         NIQ.Quest:Toggle()
-    elseif command == "capture" then
-        if NIQ.Capture and NIQ.Capture.HandleCommand then
-            NIQ.Capture:HandleCommand(rest)
-        else
-            NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
-        end
     elseif command == "version" then
-        local eqwow, capture, p99 = NIQ:GetSourceVersions()
-        NIQ:Print("Version " .. NIQ.version .. "; EQWOW snapshot: " .. eqwow .. "; captured overlay: " .. capture .. "; P99 reference: " .. p99 .. "; capture module: " .. (NIQ.Capture and "loaded" or "MISSING"))
+        local eqwow, p99 = NIQ:GetSourceVersions()
+        NIQ:Print("Version " .. NIQ.version .. "; EQWOW snapshot: " .. eqwow .. "; P99 reference: " .. p99)
     elseif command == "help" then
-        NIQ:Print("/niq [search], /niq map <zone>, /niq bags, /niq quest, /niq capture <on|off|status|rescan|clear>, /niq version")
+        NIQ:Print("/niq [search], /niq map <zone>, /niq bags, /niq quest, /niq version")
     elseif NIQ.UI then
         NIQ.UI:Show(command ~= "" and message or nil)
-    end
-end
-
-SLASH_NORRATHIQCAPTURE1 = "/niqcapture"
-SlashCmdList.NORRATHIQCAPTURE = function(message)
-    if NIQ.Capture and NIQ.Capture.HandleCommand then
-        NIQ.Capture:HandleCommand(message or "")
-    else
-        NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
     end
 end

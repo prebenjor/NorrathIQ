@@ -85,6 +85,20 @@ def lua_value_compact(value: Any) -> str:
 
 def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
     entities = {key: dict(value) for key, value in sorted(bundle.entities.items())}
+    spawns: dict[str, dict[str, Any]] = {}
+    spawn_by_entity: dict[str, dict[str, Any]] = {}
+    for raw in bundle.spawns:
+        if not raw.get("id"):
+            continue
+        spawn = dict(raw)
+        zone = entities.get(str(spawn.get("zone")), {})
+        if zone.get("name"):
+            spawn["zone"] = zone["name"]
+        entity = entities.get(str(spawn.get("entity")), {})
+        if not spawn.get("label") and entity.get("name"):
+            spawn["label"] = entity["name"]
+        spawns[str(spawn["id"])] = spawn
+        spawn_by_entity.setdefault(str(spawn.get("entity")), spawn)
     for alias in bundle.aliases:
         entity = entities.get(alias.get("entity"))
         if entity:
@@ -97,7 +111,7 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
         if not source:
             continue
         key = {
-            "DROPPED_BY": "drops", "QUEST_INPUT": "quests", "TURN_IN_TO": "turnins",
+            "DROPPED_BY": "drops", "LOCATED_IN": "locations", "QUEST_INPUT": "quests", "TURN_IN_TO": "turnins",
             "RECIPE_INPUT": "components", "CRAFTED_BY": "recipes",
             "COMPANION_ITEM": "related", "RELATED_TO": "related",
             "KEY_STEP": "related", "QUEST_REWARD": "rewards",
@@ -105,16 +119,16 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
         }.get(edge.get("relation"), "relations")
         if key == "drops":
             target = entities.get(edge.get("to"), {})
+            spawn = spawn_by_entity.get(str(edge.get("to")), {})
             source.setdefault(key, []).append({
                 "npc": target.get("name", edge.get("to")),
-                "zone": edge.get("zone") or target.get("zone"),
+                "zone": edge.get("zone") or target.get("zone") or spawn.get("zone"),
                 "level": target.get("level"),
                 "confidence": edge.get("confidence", "unknown"),
                 "chance": edge.get("dropChance"),
                 "minLevel": edge.get("minLevel"),
                 "maxLevel": edge.get("maxLevel"),
-                "observedCount": edge.get("observedCount"),
-                "observedWindows": edge.get("observedWindows"),
+                "marker": spawn.get("id"),
             })
         else:
             source.setdefault(key, []).append(edge.get("to"))
@@ -125,13 +139,26 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
             target.setdefault("related", []).append(edge.get("from"))
         elif target and relation == "QUEST_REWARD":
             target.setdefault("quests", []).append(edge.get("from"))
+        elif target and relation == "LOCATED_IN":
+            target.setdefault("contents", []).append(edge.get("from"))
         elif target and relation in {"COMPANION_ITEM", "RELATED_TO", "KEY_STEP"}:
             target.setdefault("related", []).append(edge.get("from"))
     for entity in entities.values():
-        for key in ("aliases", "quests", "turnins", "recipes", "components", "related", "rewards", "vendors", "trainers", "givers", "relations"):
+        for key in ("aliases", "quests", "turnins", "recipes", "components", "related", "rewards", "vendors", "trainers", "givers", "locations", "contents", "relations"):
             if key in entity:
                 entity[key] = list(dict.fromkeys(entity[key]))
-    zones = bundle.maps.get("zones", bundle.maps) if isinstance(bundle.maps, dict) else {}
+    zones = dict(bundle.maps.get("zones", bundle.maps)) if isinstance(bundle.maps, dict) else {}
+    for entity in entities.values():
+        if entity.get("type") != "zone" or not entity.get("name"):
+            continue
+        members = entity.get("contents", [])
+        zone_data = zones.setdefault(entity["name"], {})
+        zone_data["zoneId"] = entity.get("realmId") or entity.get("clientId")
+        zone_data["memberCount"] = len(members)
+        zone_data["note"] = (
+            f"EQWOW zone {zone_data['zoneId']} links {len(members):,} records. "
+            "Exact pins are shown where NPC or object detail pages provide coordinates."
+        )
     return {
         "meta": {
             "id": bundle.manifest["id"],
@@ -144,11 +171,11 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
             "sourceSnapshots": bundle.manifest.get("sourceSnapshots", []),
             "eqwowSnapshot": bundle.manifest.get("eqwowSnapshot", ""),
             "eqwowSnapshotDate": bundle.manifest.get("eqwowSnapshotDate", ""),
-            "captureTimestamp": bundle.manifest.get("captureTimestamp", bundle.manifest.get("realmVersion", "")),
+            "realmVersion": bundle.manifest.get("realmVersion", ""),
             "p99ReferenceVersion": bundle.manifest.get("p99ReferenceVersion", ""),
         },
         "entities": entities,
-        "spawns": {str(record["id"]): record for record in bundle.spawns if record.get("id")},
+        "spawns": spawns,
         "zones": zones,
     }
 

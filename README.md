@@ -1,111 +1,45 @@
 # NorrathIQ
 
-NorrathIQ is an offline EverQuest knowledge addon for WoW 3.3.5 EQWOW/custom realms. It provides searchable item, NPC, quest, recipe, spell, zone, and map information without networking from the game client.
+NorrathIQ is an offline EverQuest knowledge addon for WoW 3.3.5 EQWOW realms. The Windows updater downloads and compiles realm data; the in-game addon performs no network requests and no longer observes or stores gameplay activity.
 
 ## Features
 
-- Item, NPC, quest, recipe, zone, key, EverQuest spell, and EQWOW/WoW spell search.
-- Tooltip uses, drops, quest relations, recipes, recommendations, provenance, and map actions.
-- Live lookup for items, NPCs, and quests encountered during play.
-- `Q`, `T`, `R`, `K`, and `$` bag badges.
-- Quest-objective resolution and source/turn-in navigation.
-- Equipment comparison when mapped realm stats are available.
-- Optional local realm capture for IDs, stats, spells, quests, loot, and sampled locations.
-- Windows updater with validation, staging, backup, and rollback.
+- Search items, NPCs, quests, recipes, spells, zones, and keys.
+- Show uses, drops, quests, recipes, recommendations, source records, and map actions in item tooltips.
+- Mark bags with `Q` quest, `T` tradeskill, `R` research, `K` key/important, and `$` conservative vendor badges.
+- Resolve quest objectives and compare mapped equipment stats.
+- Navigate through native map providers or the built-in EQ atlas fallback.
+- Update atomically with validation, backup, rollback, and staging while WoW is running.
 
 NorrathIQ never sells, destroys, moves, equips, accepts, or turns in anything automatically.
 
 ## Requirements
 
-Players need a WoW 3.3.5 client using Interface `30300`. The packaged Windows updater does not require Python.
+Players need a WoW 3.3.5 client using Interface `30300`. The packaged updater does not require Python.
 
-Maintainers need Python 3.12+, PowerShell, and the pinned dependencies in [`updater/requirements.lock`](updater/requirements.lock) when rebuilding the updater.
+Maintainers need Python 3.12+, PowerShell, and [`updater/requirements.lock`](updater/requirements.lock).
 
 ## Install
 
 1. Close WoW.
 2. Open **NorrathIQ Updater**.
-3. Confirm the WoW/AddOns and local `NorrathIQ-release` folders.
+3. Confirm the AddOns and local `NorrathIQ-release` folders under **Show advanced options** if needed.
 4. Click **Install / Repair Addon**.
-5. Enable NorrathIQ on the character-selection AddOns screen. Enable **Load out of date AddOns** if required.
-6. Enter the world and open NorrathIQ with the minimap book icon or `/niq`.
+5. Enable NorrathIQ on the character-selection AddOns screen.
+6. Open it with the minimap book icon or `/niq`.
 
-If WoW is running, installation is staged. Close WoW, expand **Show advanced options**, click **Apply staged update**, then restart the game. `/reload` does not apply files that were staged outside the active addon directory.
+If WoW is running, the updater stages the files. Close WoW and the open updater applies the staged update automatically; **Apply staged update** is also available under advanced options.
 
-Default updater paths are based on the current Windows home directory. Packagers can override them with `NORRATHIQ_RELEASE_SOURCE` and `NORRATHIQ_ADDONS_TARGET`.
+Default paths use the current Windows home directory. Packagers can override them with `NORRATHIQ_RELEASE_SOURCE` and `NORRATHIQ_ADDONS_TARGET`.
 
 ## Use
 
-### Minimap button
+- Click the minimap book to open or close the Knowledge Journal; drag it to reposition it.
+- Search an exact or partial name and use the category selector to narrow results.
+- Hover an item to show knowledge already loaded for it. Hovering never queues or loads database shards.
+- Click **Source Map**, **Turn-in**, **Related**, **Recipe**, or **Database URL** on a selected record when available.
 
-- **Left-click:** open or close the Knowledge Journal.
-- **Right-click:** show capture status.
-- **Left-drag:** move the button.
-
-### Search
-
-Type a name such as `Gnoll Fang` in the journal. Use the category selector to restrict results.
-
-The database is sharded. Explicit searches load only the required shard. Item hovers never queue, load, or index database shards.
-
-### Tooltips
-
-When data is available, item tooltips can show:
-
-- classification and uses;
-- quests, giver/turn-in relations, and rewards;
-- drop NPCs, levels, zones, camps, and approximate chances;
-- tradeskill, trivial level, components, and quantities;
-- related items and chain steps;
-- Keep, Vendor, Destroy, or Review guidance;
-- source, record ID, snapshot, and confidence;
-- drop, recipe, source-map, and turn-in-map buttons.
-
-Recommendation precedence is conservative:
-
-1. Keys and active quest uses are Keep.
-2. Known research and tradeskill uses remain Keep.
-3. `$` requires no retained use or importance rule.
-4. Destroy requires zero value, no known use, and strong evidence.
-
-### Bag badges
-
-| Badge | Meaning |
-| --- | --- |
-| `Q` | Quest item |
-| `T` | Tradeskill component |
-| `R` | Research component |
-| `K` | Key or important progression item |
-| `$` | Conservative vendor candidate |
-
-## Live discovery and capture
-
-Live discovery is enabled by default. Items hovered or scanned, non-player NPCs targeted, and accepted quests are added to the current session's lookup. Updates are incremental; unchanged observations do not rebuild the index.
-
-Persistent capture is separate and disabled by default. Enable it with:
-
-```text
-/niq capture on
-```
-
-Capture records client-visible realm facts:
-
-- item IDs, levels, icons, vendor values, stats, and equipment fields;
-- NPC IDs, levels, zones, and sampled player positions;
-- quest IDs, objectives, interactions, required items, and rewards;
-- tradeskill results, reagents, and quantities;
-- visible spellbook spells, ranks, icons, descriptions, costs, ranges, and timings;
-- loot observations linked conservatively to recent kills or targets.
-
-WoW writes SavedVariables on `/reload`, logout, or clean exit, normally to:
-
-```text
-World of Warcraft\WTF\Account\<ACCOUNT>\SavedVariables\NorrathIQ.lua
-```
-
-Use **Process captured data now** in the updater after the file is saved, or leave automatic capture processing enabled. Captured numeric IDs take precedence over external data for matching records.
-
-See [`docs/CAPTURE.md`](docs/CAPTURE.md) for capture details and accuracy limits.
+Inventory guidance is deliberately conservative: keys, quests, recipes, research, and tradeskill relations block discard advice. `$`, Vendor, and Destroy require a full record explicitly marked `verifiedNoUse`; a vendor price alone is never enough.
 
 ## Commands
 
@@ -118,73 +52,37 @@ See [`docs/CAPTURE.md`](docs/CAPTURE.md) for capture details and accuracy limits
 | `/niq quest` | Toggle the quest helper. |
 | `/niq version` | Show addon and data versions. |
 | `/niq help` | Show command help. |
-| `/niq capture on` | Enable persistent capture. |
-| `/niq capture off` | Disable capture without deleting data. |
-| `/niq capture status` | Show current-realm capture counts. |
-| `/niq capture rescan` | Rescan bags, equipment, quests, and spellbook. |
-| `/niq capture clear confirm` | Delete current-realm capture data. |
-
-`/niqcapture` is a direct alias for capture commands. Slash commands run only after pressing Enter.
 
 ## Update knowledge
 
-The updater separates three sources:
+The [EQWOW Database](http://50.6.248.85/dbviewer/) is the primary source for realm IDs, fusion spells, stats, drops, quests, NPC levels, and coordinates.
 
-### EQWOW Database - primary
+1. **Check now** compares source indexes.
+2. **Review changes** shows added, changed, and missing records.
+3. **Complete all database details** resumes the checkpointed detail crawl. NPCs are prioritized. The source allows one request per second, so a complete first crawl takes roughly 54 hours and can be paused safely.
+4. **Download one zone map** accepts an EQWOW zone ID and fetches that zone's listed NPC/object coordinate pages without waiting for the complete crawl.
+5. **Apply validated update** compiles and installs the reviewed snapshot.
 
-The [EQWOW Database](http://50.6.248.85/dbviewer/) supplies realm IDs, fusion spells, stats, drops, quests, NPC levels, and coordinates.
+The database is HTTP-only. Requests are restricted to `50.6.248.85/dbviewer/`; redirects, response sizes, parsing, and fingerprints are validated. Fingerprints detect changes but cannot authenticate the server.
 
-1. **Check now** compares lightweight indexes.
-2. **Review changes** shows entity and field changes.
-3. **Continue detail download** resumes the checkpointed crawl.
-4. **Apply validated update** compiles and installs the reviewed candidate.
-
-The site is HTTP-only. Requests are restricted to `50.6.248.85/dbviewer/`; redirects, response sizes, parsing, and fingerprints are validated. Fingerprints detect changes but cannot authenticate HTTP transport.
-
-### Game capture - realm overlay
-
-**Process captured data now** imports the latest SavedVariables observations. The overlay is reapplied after external updates.
-
-### Project 1999 Wiki - optional
-
-The [Project 1999 Wiki](https://wiki.project1999.com/) can fill missing prose. It never overrides EQWOW or captured realm facts.
-
-Data precedence is:
-
-1. Captured facts for matching realm IDs.
-2. EQWOW Database.
-3. Reviewed corrections.
-4. P99 descriptions where other sources are silent.
-
-Custom EQWOW/WoW spells remain separate from P99/EverQuest spells even when names match.
-
-## Maps
-
-- Native providers use realm map IDs and normalized coordinates.
-- The built-in atlas uses zone transforms, camps, spawn points, paths, and a coordinate grid.
-
-Captured NPC coordinates are the player's position while observing the NPC, not guaranteed spawn coordinates. Uncertain records open the correct zone with explanatory text instead of an invented pin.
+The [Project 1999 Wiki](https://wiki.project1999.com/) is an optional source for missing prose and never overrides EQWOW fields. Custom EQWOW/WoW spells remain separate from P99/EverQuest spells even when names match.
 
 ## Performance
 
 - Source data is compiled outside WoW.
-- The initial catalog is small and details are load-on-demand.
-- Searches load one prefix shard at a time.
+- Search data is split into prefix shards and details are load-on-demand.
 - Tooltips never load search or detail shards.
-- Live discoveries update one entity and its name indexes.
-- Bag scans are coalesced and unchanged items use cached metadata.
+- Bag scans are coalesced and reuse cached item metadata.
 - The full source database is never indexed in one in-game operation.
+- No gameplay observer, capture event listeners, or capture SavedVariables are installed.
 
-The first explicit search for a prefix may pause briefly while its shard loads. Later searches reuse it for the session.
+The first explicit search for a prefix may pause briefly while its shard loads. Later searches reuse it for that session.
 
 ## Troubleshooting
 
 ### `/niq` does not open
 
-- Press Enter after typing the command.
-- Confirm the addon is enabled.
-- Enable **Load out of date AddOns** if required.
-- Run `/niq version` and confirm `capture module: loaded`.
+Press Enter after typing the command, confirm NorrathIQ is enabled, and enable **Load out of date AddOns** if required.
 
 ### Search results are empty
 
@@ -195,11 +93,7 @@ The first explicit search for a prefix may pause briefly while its shard loads. 
 
 ### Hovering loads data or reduces FPS
 
-Current builds do not load database shards from hovers. Apply the staged update with WoW closed, restart the client, and verify `/niq version`. `/reload` alone does not replace staged files.
-
-### Capture is missing
-
-Run `/niq capture on`, then `/reload` or log out. Confirm the updater targets the correct client and click **Process captured data now**.
+Version 1.3.7 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
 
 ### A staged update is not active
 
@@ -207,18 +101,9 @@ Close all WoW processes and click **Apply staged update**. The installer restore
 
 ## Manual installation
 
-Copy `NorrathIQ` and all supplied `NorrathIQ_Data_*` folders directly into `Interface\AddOns` while WoW is closed:
-
-```text
-Interface\AddOns\NorrathIQ\NorrathIQ.toc
-Interface\AddOns\NorrathIQ_Data_...\NorrathIQ_Data_....toc
-```
-
-Do not add an extra release-folder nesting level.
+Copy `NorrathIQ` and every supplied `NorrathIQ_Data_*` folder directly into `Interface\AddOns` while WoW is closed. Do not add an extra release-folder nesting level.
 
 ## Maintainer CLI
-
-Run from the repository root:
 
 ```powershell
 python -m updater.norrathiq.cli validate data\seed
@@ -226,27 +111,16 @@ python -m updater.norrathiq.cli compile data\seed build
 python -m updater.norrathiq.cli install addon "C:\Games\WoW\Interface\AddOns"
 python -m updater.norrathiq.cli apply-staged "C:\Games\WoW\Interface\AddOns"
 python -m updater.norrathiq.cli gui
-```
 
-EQWOW update commands:
-
-```powershell
 python -m updater.norrathiq.cli check-source --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli source-status --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli crawl-source --cache .cache\eqwow.sqlite3
+python -m updater.norrathiq.cli crawl-zone 5218 --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli review-update --cache .cache\eqwow.sqlite3
 python -m updater.norrathiq.cli apply-update "C:\Games\WoW\Interface\AddOns" --cache .cache\eqwow.sqlite3 --confirm
 ```
 
-Capture import:
-
-```powershell
-python -m updater.norrathiq.cli import-capture "C:\Games\WoW\WTF\Account\ACCOUNT\SavedVariables\NorrathIQ.lua" data\capture --realm "Realm"
-python -m updater.norrathiq.cli merge-realm data\seed data\capture data\merged
-python -m updater.norrathiq.cli compile data\merged build\realm
-```
-
-Bundle schema: [`schema/norrathiq-bundle.schema.json`](schema/norrathiq-bundle.schema.json). Realm-export documentation: [`docs/REALM_EXPORT.md`](docs/REALM_EXPORT.md).
+Bundle schema: [`schema/norrathiq-bundle.schema.json`](schema/norrathiq-bundle.schema.json). Realm-export contract: [`docs/REALM_EXPORT.md`](docs/REALM_EXPORT.md).
 
 ## Lua API
 
@@ -255,12 +129,11 @@ local results = NorrathIQ_API.Search("Gnoll Fang", "item", 20)
 local item = NorrathIQ_API.GetEntity("eqwow:item:95750")
 local relations = NorrathIQ_API.GetRelations(item)
 NorrathIQ_API.ShowOnMap(item, "source")
-
 NorrathIQ_API.RegisterBagAdapter("MyBagAddon", adapter)
 NorrathIQ_API.RegisterMapProvider("MyMapAddon", provider)
 ```
 
-See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua) for current signatures.
+See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua).
 
 ## Verify and package
 
@@ -268,20 +141,18 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua) for current signatures.
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.1
+.\scripts\package-release.ps1 -Version 1.3.7
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).
 
 ## Privacy and limitations
 
-- The addon has no networking capability.
-- Persistent capture is opt-in, local, and never uploaded automatically.
-- Capture excludes chat, credentials, real-world identity, arbitrary files, group inventories, and combat performance.
-- SavedVariables and downloaded records are parsed as inert data.
-- Updates are sanitized, validated, checksummed, and installed with rollback.
+- The addon has no networking or gameplay-observation functionality.
+- Only UI settings are stored in SavedVariables.
+- Downloaded records are sanitized and parsed as inert data.
+- Updates are validated, checksummed, and installed with rollback.
 - V1 is English-only and the updater is Windows-focused.
-- Captured coordinates and loot rates are observations, not authoritative server data.
 - P99 is community-maintained; EQWOW uses unauthenticated HTTP.
 
 ## License

@@ -67,7 +67,7 @@ def refresh_classic_knowledge(
         tell(f"Found {len(titles)} Classic Era pages. Downloading only pages missing or stale in the local cache...")
         pages = client.fetch_pages(titles)
     tell("Reconciling page links, drops, quests, recipes, NPCs, zones, and spells...")
-    bundle = build_bundle(pages, bundle_id="p99-classic-reference", version="1.3.1")
+    bundle = build_bundle(pages, bundle_id="p99-classic-reference", version="1.3.7")
     if curated_bundle and (Path(curated_bundle) / "manifest.json").is_file():
         _overlay_curated(bundle, KnowledgeBundle.load(curated_bundle))
     errors = [issue for issue in validate_bundle(bundle) if issue.level == "error"]

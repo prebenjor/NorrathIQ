@@ -60,7 +60,7 @@ end
 
 local function append(lines, label, value)
     if value == nil or value == "" then return end
-    table.insert(lines, "|cffffd100" .. label .. ":|r |cff2b1b0e" .. tostring(value) .. "|r")
+    table.insert(lines, "|cffffd100" .. label .. ":|r |cfff4ead2" .. tostring(value) .. "|r")
 end
 
 function UI:Initialize()
@@ -215,7 +215,9 @@ function UI:CreateFrame()
     local detailPane = CreateFrame("Frame", nil, frame)
     detailPane:SetPoint("TOPLEFT", listPane, "TOPRIGHT", 12, 0)
     detailPane:SetPoint("BOTTOMRIGHT", -18, 76)
-    makeInset(detailPane, true)
+    -- QuestBG is translucent against the 3D world. Use the native tooltip
+    -- panel here so long database descriptions remain readable everywhere.
+    makeInset(detailPane, false)
     frame.detailPane = detailPane
 
     local detailIcon = detailPane:CreateTexture(nil, "ARTWORK")
@@ -236,13 +238,13 @@ function UI:CreateFrame()
     frame.detailName = detailName
     local detailType = detailPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     detailType:SetPoint("TOPLEFT", detailName, "BOTTOMLEFT", 0, -5)
-    detailType:SetTextColor(0.35, 0.20, 0.08)
+    detailType:SetTextColor(0.82, 0.76, 0.62)
     detailType:SetText("Knowledge details appear here")
     frame.detailType = detailType
 
     local detailRule = detailPane:CreateTexture(nil, "ARTWORK")
     detailRule:SetTexture("Interface\\Buttons\\WHITE8X8")
-    detailRule:SetVertexColor(0.45, 0.28, 0.08, 0.7)
+    detailRule:SetVertexColor(0.72, 0.55, 0.18, 0.8)
     detailRule:SetHeight(1)
     detailRule:SetPoint("TOPLEFT", 14, -65)
     detailRule:SetPoint("TOPRIGHT", -14, -65)
@@ -261,7 +263,7 @@ function UI:CreateFrame()
     detail:SetJustifyH("LEFT")
     detail:SetJustifyV("TOP")
     detail:SetSpacing(3)
-    detail:SetTextColor(0.16, 0.09, 0.035)
+    detail:SetTextColor(0.94, 0.91, 0.84)
     frame.detail = detail
     frame.detailLinks = {}
 
@@ -517,11 +519,11 @@ function UI:ShowEntity(entity)
     end
     if entity.source then
         table.insert(lines, "")
-        table.insert(lines, "|cff6b5030Source: " .. (entity.source.name or entity.source.sourceId or "unknown source") .. "|r")
+        table.insert(lines, "|cff9fb7c2Source: " .. (entity.source.name or entity.source.sourceId or "unknown source") .. "|r")
         append(lines, "Source record ID", entity.source.recordId)
         append(lines, "Snapshot", entity.source.snapshotDate or entity.source.snapshotId)
-        table.insert(lines, "|cff6b5030Confidence: " .. (entity.source.confidence or "unknown") .. (entity.source.transport == "unverified-http" and " - unverified HTTP" or "") .. "|r")
-        table.insert(lines, "|cff6b5030" .. (entity.source.url or "No external source URL") .. "|r")
+        table.insert(lines, "|cff9fb7c2Confidence: " .. (entity.source.confidence or "unknown") .. (entity.source.transport == "unverified-http" and " - unverified HTTP" or "") .. "|r")
+        table.insert(lines, "|cff79b8d8" .. (entity.source.url or "No external source URL") .. "|r")
     end
     self.frame.detail:SetText(table.concat(lines, "\n"))
     self:BuildDetailLinks(entity, relations)

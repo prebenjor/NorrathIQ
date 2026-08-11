@@ -92,7 +92,7 @@ Press Enter after typing the command, confirm NorrathIQ is enabled, and enable *
 
 ### Hovering loads data or reduces FPS
 
-Version 1.3.4 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
+Version 1.3.5 does not load or observe data from hovers. Apply any staged update with WoW closed, restart the client, and check `/niq version`. `/reload` does not replace staged files.
 
 ### A staged update is not active
 
@@ -139,7 +139,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua).
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.4
+.\scripts\package-release.ps1 -Version 1.3.5
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

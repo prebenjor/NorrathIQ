@@ -154,6 +154,9 @@ class LuaContractTests(unittest.TestCase):
         self.assertIn('table.insert(UISpecialFrames, "NorrathIQBrowserFrame")', ui)
         self.assertNotIn("\\AddOns\\", ui)
         self.assertNotIn("math.mod", ui)
+        self.assertIn("makeInset(detailPane, false)", ui)
+        self.assertIn("detail:SetTextColor(0.94, 0.91, 0.84)", ui)
+        self.assertNotIn("|cff2b1b0e", ui)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ NorrathIQ = NorrathIQ or {}
 local NIQ = NorrathIQ
 
 NIQ.name = ADDON_NAME or "NorrathIQ"
-NIQ.version = "1.3.1"
+NIQ.version = "1.3.2"
 NIQ.schemaVersion = 1
 NIQ.modules = NIQ.modules or {}
 NIQ.moduleOrder = NIQ.moduleOrder or {}
@@ -195,7 +195,7 @@ SlashCmdList.NORRATHIQ = function(message)
         if NIQ.Capture and NIQ.Capture.HandleCommand then
             NIQ.Capture:HandleCommand(rest)
         else
-            NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
+            NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.2, then run /reload.")
         end
     elseif command == "version" then
         local eqwow, capture, p99 = NIQ:GetSourceVersions()
@@ -212,6 +212,6 @@ SlashCmdList.NORRATHIQCAPTURE = function(message)
     if NIQ.Capture and NIQ.Capture.HandleCommand then
         NIQ.Capture:HandleCommand(message or "")
     else
-        NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.1, then run /reload.")
+        NIQ:Print("Capture module is not loaded. Reinstall NorrathIQ 1.3.2, then run /reload.")
     end
 end

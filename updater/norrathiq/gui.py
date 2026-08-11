@@ -26,7 +26,7 @@ try:
     from .capture import import_capture
     from .classic import refresh_classic_knowledge
     from .compiler import compile_bundle
-    from .eqwow import EqwowCache, EqwowSource, apply_candidate_update, review_text
+    from .eqwow import EqwowCache, EqwowSource, apply_candidate_update, build_bundle_from_cache, review_text
     from .installer import apply_staged, install_addons, wow_is_running
     from .graph import build_bundle
     from .models import KnowledgeBundle
@@ -39,7 +39,7 @@ except ImportError:  # Allows direct execution by PyInstaller.
     from norrathiq.capture import import_capture
     from norrathiq.classic import refresh_classic_knowledge
     from norrathiq.compiler import compile_bundle
-    from norrathiq.eqwow import EqwowCache, EqwowSource, apply_candidate_update, review_text
+    from norrathiq.eqwow import EqwowCache, EqwowSource, apply_candidate_update, build_bundle_from_cache, review_text
     from norrathiq.installer import apply_staged, install_addons, wow_is_running
     from norrathiq.graph import build_bundle
     from norrathiq.models import KnowledgeBundle
@@ -167,7 +167,7 @@ class UpdaterApp(tk.Tk):
         capture_card = ttk.LabelFrame(normal, text="Game capture — AUTHORITATIVE REALM OVERLAY", padding=10)
         capture_card.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         ttk.Label(capture_card, textvariable=self.capture_status, wraplength=810).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Button(capture_card, text="Process captured data now", command=self._process_capture, width=28).grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 10))
+        ttk.Button(capture_card, text="Update observed item details", command=self._process_capture, width=28).grid(row=1, column=0, sticky="w", pady=(8, 0), padx=(0, 10))
         ttk.Label(capture_card, text="In WoW: /niq capture on — then play normally and /reload or log out.").grid(row=1, column=1, sticky="w", pady=(8, 0))
         ttk.Checkbutton(
             capture_card,
@@ -477,11 +477,39 @@ class UpdaterApp(tk.Tk):
             else:
                 messagebox.showinfo("NorrathIQ updater", message)
             return
-        base_bundle = Path(self.bundle_path.get())
         work_root = PREFERRED_RELEASE_SOURCE.parent / "NorrathIQ-auto"
+
+        def operation():
+            captured = import_capture(capture_file, realm_name=choose_realm(capture_file))
+            kind_order = {"item": 0, "quest": 1, "npc": 2, "object": 3, "zone": 4, "spell": 5}
+            targets = []
+            for entity in captured.entities.values():
+                kind = entity.get("type")
+                record_id = entity.get("realmId") or entity.get("clientId")
+                if kind in kind_order and record_id is not None:
+                    targets.append((kind, int(record_id)))
+            targets = list(dict.fromkeys(sorted(targets, key=lambda value: kind_order[value[0]])))
+
+            base_bundle = Path(self.bundle_path.get())
+            cache_path = self._eqwow_cache_path()
+            if cache_path.is_file():
+                with EqwowCache(cache_path) as cache:
+                    if cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot"):
+                        source = EqwowSource(cache)
+                        downloaded, processed = source.crawl_targets(
+                            targets,
+                            max_records=120,
+                            progress=lambda message: self.events.put(("log", message)),
+                        )
+                        enriched = build_bundle_from_cache(cache)
+                        base_bundle = work_root / "eqwow-base"
+                        enriched.write(base_bundle)
+                        self.events.put(("log", f"Checked {processed:,} useful EQWOW records; downloaded {downloaded:,} new detail pages."))
+            return process_capture_update(capture_file, base_bundle, work_root, self.wow_path.get())
+
         self._run(
-            "Automatically checking and installing captured game data..." if automatic else "Checking and installing captured game data...",
-            lambda: process_capture_update(capture_file, base_bundle, work_root, self.wow_path.get()),
+            "Updating observed records and their source locations..." if automatic else "Downloading observed record details and source locations...",
+            operation,
         )
 
     def _watch_capture(self) -> None:

@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -693,6 +694,90 @@ class EqwowSource:
         remaining = len(self.cache.pending(snapshot))
         return completed, remaining
 
+    def crawl_targets(
+        self,
+        targets: Iterable[tuple[str, int]],
+        *,
+        snapshot_id: str | None = None,
+        include_source_npcs: bool = True,
+        max_records: int = 120,
+        progress: Callable[[str], None] | None = None,
+        should_pause: Callable[[], bool] | None = None,
+    ) -> tuple[int, int]:
+        """Download a bounded set of useful details without entering the full crawl.
+
+        Captured items and quests are followed to their direct source NPCs so drop
+        zones and map coordinates become available. Already verified records cost no
+        request and are still inspected for their source links.
+        """
+        snapshot = snapshot_id or self.cache.get_meta("candidate_snapshot") or self.cache.get_meta("active_snapshot")
+        if not snapshot:
+            raise ValueError("No EQWOW index exists. Run Check now first.")
+        limit = max(1, int(max_records))
+        queue = deque()
+        queued: set[tuple[str, int]] = set()
+        for raw_kind, raw_id in targets:
+            kind, record_id = str(raw_kind), int(raw_id)
+            if kind not in KINDS:
+                continue
+            key = (kind, record_id)
+            if key not in queued:
+                queued.add(key)
+                queue.append(key)
+
+        downloaded = processed = 0
+        while queue and processed < limit:
+            if should_pause and should_pause():
+                break
+            kind, record_id = queue.popleft()
+            row = self.cache.db.execute(
+                "SELECT * FROM records WHERE snapshot_id=? AND kind=? AND record_id=?",
+                (snapshot, kind, record_id),
+            ).fetchone()
+            detail = json.loads(row["detail_json"]) if row and row["detail_verified"] and row["detail_json"] else None
+            if detail is None:
+                label = row["name"] if row else f"unlisted {kind}"
+                if progress:
+                    progress(f"Downloading useful {kind} {record_id}: {label}")
+                text, _ = self.client.get(source_url(kind, record_id))
+                detail = parse_detail_page(kind, record_id, text)
+                if row is None:
+                    self.cache.put_indexes(snapshot, kind, [{
+                        "kind": kind, "id": record_id, "name": detail["name"],
+                        "fields": {"id": record_id, "unlisted": True},
+                    }])
+                self.cache.put_detail(snapshot, detail)
+                downloaded += 1
+            processed += 1
+
+            if not include_source_npcs:
+                continue
+            related: list[tuple[str, int]] = []
+            for view in detail.get("listviews", []):
+                view_id = str(view.get("id", "")).casefold()
+                template = str(view.get("template", "")).casefold()
+                source_view = (
+                    kind == "item" and template == "npc" and any(word in view_id for word in ("drop", "sold", "vendor", "merchant"))
+                ) or (
+                    kind == "quest" and template == "npc" and any(word in view_id for word in ("start", "giver", "end", "turn"))
+                )
+                if not source_view:
+                    continue
+                for raw in view.get("data", []):
+                    if not isinstance(raw, dict):
+                        continue
+                    try:
+                        related.append(("npc", int(raw["id"])))
+                    except (KeyError, TypeError, ValueError):
+                        continue
+            # Follow each root immediately instead of letting a large spellbook or
+            # inventory push its map sources beyond the bounded request budget.
+            for key in reversed(related):
+                if key not in queued:
+                    queued.add(key)
+                    queue.appendleft(key)
+        return downloaded, processed
+
 
 def _entity_id(kind: str, record_id: int) -> str:
     return f"eqwow:{kind}:{int(record_id)}"
@@ -721,7 +806,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.1") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.2") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")
@@ -871,7 +956,26 @@ def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dic
                     target = _ensure_entity(bundle, "npc", raw, snapshot, checked_at)
                     if target:
                         locations = raw.get("location") or []
-                        _edge(bundle, source_id, "DROPPED_BY", target, provenance, dropChance=raw.get("percent"), zoneId=locations[0] if locations else None, minLevel=raw.get("minlevel"), maxLevel=raw.get("maxlevel"))
+                        zone_id = locations[0] if locations else None
+                        zone_name = None
+                        if zone_id is not None:
+                            zone = bundle.entities.get(_entity_id("zone", int(zone_id)), {})
+                            if str(zone.get("name", "")).casefold() != "undefined":
+                                zone_name = zone.get("name")
+                            npc = bundle.entities.get(target, {})
+                            npc["zoneId"] = int(zone_id)
+                            if zone_name:
+                                npc["zone"] = zone_name
+                        npc = bundle.entities.get(target, {})
+                        if raw.get("minlevel") is not None:
+                            npc["minLevel"] = raw.get("minlevel")
+                        if raw.get("maxlevel") is not None:
+                            npc["maxLevel"] = raw.get("maxlevel")
+                        _edge(
+                            bundle, source_id, "DROPPED_BY", target, provenance,
+                            dropChance=raw.get("percent"), zoneId=zone_id, zone=zone_name,
+                            minLevel=raw.get("minlevel"), maxLevel=raw.get("maxlevel"),
+                        )
                 elif kind == "item" and template == "npc" and any(word in view_id for word in ("sold", "vendor", "merchant")):
                     target = _ensure_entity(bundle, "npc", raw, snapshot, checked_at)
                     if target:
@@ -917,7 +1021,7 @@ def _build_relations(bundle: KnowledgeBundle, details: dict[tuple[str, int], dic
                     target = _ensure_entity(bundle, "spell", raw, snapshot, checked_at)
                     if target:
                         _edge(bundle, source_id, "CRAFTED_BY", target, provenance)
-                elif template in KINDS:
+                elif template in KINDS and any(word in view_id for word in ("related", "companion")):
                     target = _ensure_entity(bundle, template, raw, snapshot, checked_at)
                     if target:
                         _edge(bundle, source_id, "RELATED_TO", target, provenance)

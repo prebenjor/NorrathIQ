@@ -85,6 +85,20 @@ def lua_value_compact(value: Any) -> str:
 
 def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
     entities = {key: dict(value) for key, value in sorted(bundle.entities.items())}
+    spawns: dict[str, dict[str, Any]] = {}
+    spawn_by_entity: dict[str, dict[str, Any]] = {}
+    for raw in bundle.spawns:
+        if not raw.get("id"):
+            continue
+        spawn = dict(raw)
+        zone = entities.get(str(spawn.get("zone")), {})
+        if zone.get("name"):
+            spawn["zone"] = zone["name"]
+        entity = entities.get(str(spawn.get("entity")), {})
+        if not spawn.get("label") and entity.get("name"):
+            spawn["label"] = entity["name"]
+        spawns[str(spawn["id"])] = spawn
+        spawn_by_entity.setdefault(str(spawn.get("entity")), spawn)
     for alias in bundle.aliases:
         entity = entities.get(alias.get("entity"))
         if entity:
@@ -105,14 +119,16 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
         }.get(edge.get("relation"), "relations")
         if key == "drops":
             target = entities.get(edge.get("to"), {})
+            spawn = spawn_by_entity.get(str(edge.get("to")), {})
             source.setdefault(key, []).append({
                 "npc": target.get("name", edge.get("to")),
-                "zone": edge.get("zone") or target.get("zone"),
+                "zone": edge.get("zone") or target.get("zone") or spawn.get("zone"),
                 "level": target.get("level"),
                 "confidence": edge.get("confidence", "unknown"),
                 "chance": edge.get("dropChance"),
                 "minLevel": edge.get("minLevel"),
                 "maxLevel": edge.get("maxLevel"),
+                "marker": spawn.get("id"),
                 "observedCount": edge.get("observedCount"),
                 "observedWindows": edge.get("observedWindows"),
             })
@@ -148,7 +164,7 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
             "p99ReferenceVersion": bundle.manifest.get("p99ReferenceVersion", ""),
         },
         "entities": entities,
-        "spawns": {str(record["id"]): record for record in bundle.spawns if record.get("id")},
+        "spawns": spawns,
         "zones": zones,
     }
 

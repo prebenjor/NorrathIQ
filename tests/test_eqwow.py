@@ -95,6 +95,50 @@ def test_gnoll_fang_relations_and_npc_spawn(tmp_path):
     assert not [issue for issue in validate_bundle(bundle) if issue.level == "error"]
 
 
+def test_targeted_item_crawl_follows_drop_npc_and_compiles_map_marker(tmp_path):
+    item_html = detail_page("item", 88751, "Ghoulbane", views=(
+        {"template": "npc", "id": "dropped-by", "data": [
+            {"id": 50423, "name": "the froglok shin lord", "minlevel": 30, "maxlevel": 30,
+             "location": [5146], "percent": 25},
+        ]},
+        {"template": "item", "id": "see-also", "data": [
+            {"id": 96147, "name": "Corrupted Ghoulbane"},
+        ]},
+    ))
+    npc_html = detail_page("npc", 50423, "the froglok shin lord", mapper={
+        "5146": [{"coords": [[42.6, 94.1, {}]], "count": 1}],
+    })
+
+    class FakeClient:
+        def get(self, url):
+            if "?item=88751" in url:
+                return item_html, {}
+            if "?npc=50423" in url:
+                return npc_html, {}
+            raise AssertionError(url)
+
+    with EqwowCache(tmp_path / "targeted.sqlite3") as cache:
+        snapshot = cache.new_snapshot()
+        cache.put_indexes(snapshot, "item", [{"kind": "item", "id": 88751, "name": "Ghoulbane", "fields": {"id": 88751}}])
+        cache.put_indexes(snapshot, "npc", [{"kind": "npc", "id": 50423, "name": "the froglok shin lord", "fields": {"id": 50423}}])
+        cache.put_indexes(snapshot, "zone", [{"kind": "zone", "id": 5146, "name": "Guk", "fields": {"id": 5146}}])
+        cache.finish_index(snapshot)
+        downloaded, processed = EqwowSource(cache, FakeClient()).crawl_targets([("item", 88751)])
+        bundle = build_bundle_from_cache(cache)
+
+    assert (downloaded, processed) == (2, 2)
+    drop = next(edge for edge in bundle.edges if edge["from"] == "eqwow:item:88751" and edge["relation"] == "DROPPED_BY")
+    assert drop["zone"] == "Guk" and drop["dropChance"] == 25
+    assert not any(edge["relation"] == "RELATED_TO" for edge in bundle.edges)
+    assert bundle.entities["eqwow:npc:50423"]["zone"] == "Guk"
+    from norrathiq.compiler import bundle_to_pack
+    packed = bundle_to_pack(bundle)
+    packed_drop = packed["entities"]["eqwow:item:88751"]["drops"][0]
+    assert packed_drop["zone"] == "Guk"
+    assert packed_drop["marker"]
+    assert packed["spawns"][packed_drop["marker"]]["x"] == 0.426
+
+
 def test_custom_bind_and_moonfire_are_wow_namespaced():
     bind = parse_detail_page("spell", 86901, detail_page(
         "spell", 86901, "Bind Affinity (Self)",

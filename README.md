@@ -103,7 +103,7 @@ WoW writes SavedVariables on `/reload`, logout, or clean exit, normally to:
 World of Warcraft\WTF\Account\<ACCOUNT>\SavedVariables\NorrathIQ.lua
 ```
 
-Use **Process captured data now** in the updater after the file is saved, or leave automatic capture processing enabled. Captured numeric IDs take precedence over external data for matching records.
+Use **Update observed item details** in the updater after the file is saved, or leave automatic capture processing enabled. It downloads a bounded set of exact captured records and their direct source NPCs, then reapplies captured numeric IDs over the external data.
 
 See [`docs/CAPTURE.md`](docs/CAPTURE.md) for capture details and accuracy limits.
 
@@ -143,7 +143,7 @@ The site is HTTP-only. Requests are restricted to `50.6.248.85/dbviewer/`; redir
 
 ### Game capture - realm overlay
 
-**Process captured data now** imports the latest SavedVariables observations. The overlay is reapplied after external updates.
+**Update observed item details** imports the latest SavedVariables observations and fetches their direct source NPC details without starting the full database crawl. The overlay is reapplied after external updates.
 
 ### Project 1999 Wiki - optional
 
@@ -199,7 +199,7 @@ Current builds do not load database shards from hovers. Apply the staged update 
 
 ### Capture is missing
 
-Run `/niq capture on`, then `/reload` or log out. Confirm the updater targets the correct client and click **Process captured data now**.
+Run `/niq capture on`, then `/reload` or log out. Confirm the updater targets the correct client and click **Update observed item details**.
 
 ### A staged update is not active
 
@@ -268,7 +268,7 @@ See [`addon/NorrathIQ/API.lua`](addon/NorrathIQ/API.lua) for current signatures.
 python -m pytest -q
 .\scripts\verify.ps1
 .\scripts\build-updater.ps1
-.\scripts\package-release.ps1 -Version 1.3.1
+.\scripts\package-release.ps1 -Version 1.3.2
 ```
 
 Manual client checks are in [`docs/IN_CLIENT_TESTS.md`](docs/IN_CLIENT_TESTS.md).

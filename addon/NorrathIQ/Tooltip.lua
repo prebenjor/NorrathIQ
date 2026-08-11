@@ -91,7 +91,15 @@ function Tooltip:Decorate(tooltip)
     if entity.summary then tooltip:AddLine(entity.summary, 0.88, 0.88, 0.88, true) end
     addList(tooltip, "Used for", entity.uses)
     addList(tooltip, "Dropped by", entity.drops, function(drop)
-        local level = drop.level and " (" .. drop.level .. ")" or ""
+        local levelText = drop.level
+        if not levelText and (drop.minLevel or drop.maxLevel) then
+            if drop.minLevel and drop.maxLevel and drop.minLevel == drop.maxLevel then
+                levelText = tostring(drop.minLevel)
+            else
+                levelText = tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?")
+            end
+        end
+        local level = levelText and " (level " .. levelText .. ")" or ""
         local observed = ""
         if drop.observedCount and drop.observedWindows and drop.observedWindows > 0 then
             observed = string.format(" — observed %d/%d loot windows", drop.observedCount, drop.observedWindows)

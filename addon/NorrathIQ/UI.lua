@@ -484,7 +484,14 @@ function UI:ShowEntity(entity)
         table.insert(lines, "|cffffd100Found from|r")
         for _, drop in ipairs(entity.drops) do
             local chance = drop.chance and " - approx. " .. tostring(drop.chance) .. "%" or ""
-            local level = drop.level or ((drop.minLevel or drop.maxLevel) and tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?") or nil)
+            local level = drop.level
+            if not level and (drop.minLevel or drop.maxLevel) then
+                if drop.minLevel and drop.maxLevel and drop.minLevel == drop.maxLevel then
+                    level = tostring(drop.minLevel)
+                else
+                    level = tostring(drop.minLevel or "?") .. "-" .. tostring(drop.maxLevel or "?")
+                end
+            end
             table.insert(lines, "  - " .. drop.npc .. " - " .. (drop.zone or "unknown") .. (level and " (level " .. level .. ")" or "") .. chance)
         end
     end

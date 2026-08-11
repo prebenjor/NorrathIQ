@@ -78,5 +78,5 @@ function Search:Query(text, filter, limit)
 end
 
 function Search:ResolveItemLink(link)
-    return NIQ.Data:ResolveExact(NIQ:ItemNameFromLink(link), false)
+    return NIQ.Data:ResolveExact(NIQ:ItemNameFromLink(link), false, false)
 end

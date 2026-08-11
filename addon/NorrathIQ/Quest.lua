@@ -1,5 +1,5 @@
 local NIQ = NorrathIQ
-local Quest = { entries = {}, rows = {} }
+local Quest = { entries = {}, rows = {}, resolveCache = {}, cacheRevision = -1 }
 NIQ.Quest = Quest
 NIQ:RegisterModule("Quest", Quest)
 
@@ -75,29 +75,55 @@ end
 
 function Quest:ResolveObjective(description, questId)
     local normalized = NIQ:Normalize(description)
+    local revision = NIQ.Data.revision or 0
+    if self.cacheRevision ~= revision then
+        self.resolveCache, self.cacheRevision = {}, revision
+    end
+    local cacheKey = tostring(questId or "") .. "\031" .. normalized
+    local cached = self.resolveCache[cacheKey]
+    if cached then return cached.value ~= false and cached.value or nil, cached.status end
+
+    local function resolved(value, status)
+        self.resolveCache[cacheKey] = { value = value or false, status = status }
+        return value, status
+    end
     local candidates = {}
+    local seen = {}
+    local function addCandidate(entity)
+        if entity and not seen[entity.id] then
+            seen[entity.id] = true
+            table.insert(candidates, entity)
+        end
+    end
     local realmQuest = questId and NIQ.Data:GetQuestByRealmId(questId)
     if realmQuest then
-        for _, entity in ipairs(NIQ.Data:GetRelations(realmQuest)) do
+        for _, entity in ipairs(NIQ.Data:GetRelations(realmQuest, false)) do
             if string.find(normalized, NIQ:Normalize(entity.name), 1, true) then
-                table.insert(candidates, entity)
+                addCandidate(entity)
             end
         end
-        if #candidates == 1 then return candidates[1], "realm quest id" end
-        if #candidates > 1 then return candidates, "ambiguous" end
+        if #candidates == 1 then return resolved(candidates[1], "realm quest id") end
+        if #candidates > 1 then return resolved(candidates, "ambiguous") end
     end
     for _, entity in pairs(NIQ.Data.entities) do
         if entity.type == "item" or entity.type == "npc" then
             local name = NIQ:Normalize(entity.name)
-            if name ~= "" and string.find(normalized, name, 1, true) then table.insert(candidates, entity) end
-            for _, alias in ipairs(entity.aliases or {}) do
-                if string.find(normalized, NIQ:Normalize(alias), 1, true) then table.insert(candidates, entity) break end
+            local matched = name ~= "" and string.find(normalized, name, 1, true)
+            if not matched then
+                for _, alias in ipairs(entity.aliases or {}) do
+                    local normalizedAlias = NIQ:Normalize(alias)
+                    if normalizedAlias ~= "" and string.find(normalized, normalizedAlias, 1, true) then
+                        matched = true
+                        break
+                    end
+                end
             end
+            if matched then addCandidate(entity) end
         end
     end
-    if #candidates == 1 then return candidates[1], "exact phrase" end
-    if #candidates > 1 then return candidates, "ambiguous" end
-    return nil, "missing"
+    if #candidates == 1 then return resolved(candidates[1], "exact phrase") end
+    if #candidates > 1 then return resolved(candidates, "ambiguous") end
+    return resolved(nil, "missing")
 end
 
 function Quest:Refresh()
@@ -105,11 +131,11 @@ function Quest:Refresh()
     if not GetNumQuestLogEntries or not GetQuestLogTitle then return end
     local count = GetNumQuestLogEntries()
     for questIndex = 1, count do
-        local title, level, tag, isHeader, isCollapsed, isComplete, frequency, questId = GetQuestLogTitle(questIndex)
+        local title, _, _, isHeader, _, _, _, questId = GetQuestLogTitle(questIndex)
         if title and not isHeader then
             local objectives = GetNumQuestLeaderBoards and GetNumQuestLeaderBoards(questIndex) or 0
             for objectiveIndex = 1, objectives do
-                local description, objectiveType, complete = GetQuestLogLeaderBoard(objectiveIndex, questIndex)
+                local description, _, complete = GetQuestLogLeaderBoard(objectiveIndex, questIndex)
                 if description then
                     local entity, status = self:ResolveObjective(description, questId)
                     if status == "exact phrase" or status == "realm quest id" then

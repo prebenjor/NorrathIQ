@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from norrathiq.eqwow import (
+from updater.norrathiq.eqwow import (
     EqwowCache,
     EqwowSource,
     build_bundle_from_cache,
@@ -12,9 +12,9 @@ from norrathiq.eqwow import (
     parse_index_page,
     validate_source_url,
 )
-from norrathiq.models import KnowledgeBundle
-from norrathiq.realm import merge_realm
-from norrathiq.validate import validate_bundle
+from updater.norrathiq.models import KnowledgeBundle
+from updater.norrathiq.realm import merge_realm
+from updater.norrathiq.validate import validate_bundle
 
 
 def detail_page(kind: str, record_id: int, name: str, *, tooltip: str = "", mapper=None, views=(), header=None) -> str:
@@ -95,7 +95,7 @@ def test_gnoll_fang_relations_and_npc_spawn(tmp_path):
     assert not [issue for issue in validate_bundle(bundle) if issue.level == "error"]
 
 
-def test_targeted_item_crawl_follows_drop_npc_and_compiles_map_marker(tmp_path):
+def test_item_and_drop_npc_details_compile_map_marker(tmp_path):
     item_html = detail_page("item", 88751, "Ghoulbane", views=(
         {"template": "npc", "id": "dropped-by", "data": [
             {"id": 50423, "name": "the froglok shin lord", "minlevel": 30, "maxlevel": 30,
@@ -123,15 +123,17 @@ def test_targeted_item_crawl_follows_drop_npc_and_compiles_map_marker(tmp_path):
         cache.put_indexes(snapshot, "npc", [{"kind": "npc", "id": 50423, "name": "the froglok shin lord", "fields": {"id": 50423}}])
         cache.put_indexes(snapshot, "zone", [{"kind": "zone", "id": 5146, "name": "Guk", "fields": {"id": 5146}}])
         cache.finish_index(snapshot)
-        downloaded, processed = EqwowSource(cache, FakeClient()).crawl_targets([("item", 88751)])
+        downloaded, remaining = EqwowSource(cache, FakeClient()).crawl(
+            limit=2, priority=[("item", 88751), ("npc", 50423)]
+        )
         bundle = build_bundle_from_cache(cache)
 
-    assert (downloaded, processed) == (2, 2)
+    assert (downloaded, remaining) == (2, 1)
     drop = next(edge for edge in bundle.edges if edge["from"] == "eqwow:item:88751" and edge["relation"] == "DROPPED_BY")
     assert drop["zone"] == "Guk" and drop["dropChance"] == 25
     assert not any(edge["relation"] == "RELATED_TO" for edge in bundle.edges)
     assert bundle.entities["eqwow:npc:50423"]["zone"] == "Guk"
-    from norrathiq.compiler import bundle_to_pack
+    from updater.norrathiq.compiler import bundle_to_pack
     packed = bundle_to_pack(bundle)
     packed_drop = packed["entities"]["eqwow:item:88751"]["drops"][0]
     assert packed_drop["zone"] == "Guk"
@@ -214,7 +216,7 @@ def test_index_parser_is_inert_and_source_urls_are_locked():
         validate_source_url("http://50.6.248.85/other/?item=1")
 
 
-def test_capture_matches_eqwow_by_numeric_id_before_name():
+def test_realm_export_matches_eqwow_by_numeric_id_before_name():
     base = KnowledgeBundle.empty("base")
     base.manifest["source"] = "EQWOW Database"
     base.entities["eqwow:spell:86901"] = {
@@ -222,21 +224,21 @@ def test_capture_matches_eqwow_by_numeric_id_before_name():
         "realmId": 86901, "clientId": 86901, "game": "wow", "namespace": "eqwow-wow",
         "source": {"url": "http://50.6.248.85/dbviewer/?spell=86901", "confidence": "high"},
     }
-    capture = KnowledgeBundle.empty("capture")
-    capture.manifest["source"] = "Observed client"
-    capture.entities["capture:spell"] = {
-        "id": "capture:spell", "type": "spell", "name": "Localized Different Name",
+    realm = KnowledgeBundle.empty("realm")
+    realm.manifest["source"] = "Realm export"
+    realm.entities["realm:spell"] = {
+        "id": "realm:spell", "type": "spell", "name": "Localized Different Name",
         "realmId": 86901, "clientId": 86901, "game": "wow", "castTime": 6000,
-        "source": {"url": "capture://spell/86901", "confidence": "high"},
+        "source": {"url": "realm://spell/86901", "confidence": "high"},
     }
-    merged, report = merge_realm(base, capture)
-    assert report.matched == [("capture:spell", "eqwow:spell:86901")]
+    merged, report = merge_realm(base, realm)
+    assert report.matched == [("realm:spell", "eqwow:spell:86901")]
     assert merged.entities["eqwow:spell:86901"]["castTime"] == 6000
-    assert merged.entities["eqwow:spell:86901"]["fieldOrigins"]["castTime"] == "game-capture"
+    assert merged.entities["eqwow:spell:86901"]["fieldOrigins"]["castTime"] == "realm-export"
 
 
 def test_recursive_partition_has_no_duplicate_boundary(monkeypatch, tmp_path):
-    import norrathiq.eqwow as module
+    import updater.norrathiq.eqwow as module
     monkeypatch.setattr(module, "LIST_LIMIT", 4)
 
     class PartitionClient:

@@ -88,13 +88,13 @@ class InstallerTests(unittest.TestCase):
             curated.mkdir()
             (curated / "NorrathIQ_Data_curated_Index.toc").write_text("## Interface: 30300", encoding="utf-8")
             source = root / "compiled"
-            pack = source / "NorrathIQ_Data_capture_Index"
+            pack = source / "NorrathIQ_Data_eqwow_Index"
             pack.mkdir(parents=True)
-            (pack / "NorrathIQ_Data_capture_Index.toc").write_text("## Interface: 30300", encoding="utf-8")
+            (pack / "NorrathIQ_Data_eqwow_Index.toc").write_text("## Interface: 30300", encoding="utf-8")
             with patch("norrathiq.installer.wow_is_running", return_value=False):
                 result = install_addons(source, addons)
             self.assertEqual("installed", result.status)
-            self.assertTrue((addons / "NorrathIQ_Data_capture_Index").is_dir())
+            self.assertTrue((addons / "NorrathIQ_Data_eqwow_Index").is_dir())
             self.assertFalse(curated.is_dir())
             self.assertTrue((result.backup / "NorrathIQ_Data_curated_Index").is_dir())
             self.assertTrue((core / "NorrathIQ.toc").is_file())

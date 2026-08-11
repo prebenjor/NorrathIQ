@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-from .capture import import_capture
 from .compiler import compile_bundle
 from .eqwow import EqwowCache, EqwowSource, apply_candidate_update, review_text
 from .graph import build_bundle
@@ -49,11 +48,6 @@ def parser() -> argparse.ArgumentParser:
     merge.add_argument("realm", type=Path)
     merge.add_argument("output", type=Path)
 
-    capture = commands.add_parser("import-capture", help="Convert NorrathIQ SavedVariables observations to a realm bundle")
-    capture.add_argument("saved_variables", type=Path, help="WTF/Account/<account>/SavedVariables/NorrathIQ.lua")
-    capture.add_argument("output", type=Path)
-    capture.add_argument("--realm", help="Captured realm name when the file contains more than one realm")
-
     install = commands.add_parser("install", help="Atomically install local addon folders")
     install.add_argument("source", type=Path)
     install.add_argument("wow", type=Path)
@@ -86,7 +80,6 @@ def parser() -> argparse.ArgumentParser:
     apply_update.add_argument("--cache", type=Path, default=Path(".cache/eqwow.sqlite3"))
     apply_update.add_argument("--portable-output", type=Path, default=Path("dist/NorrathIQ-EQWOW/bundle"))
     apply_update.add_argument("--compiled-output", type=Path, default=Path("dist/NorrathIQ-EQWOW/compiled"))
-    apply_update.add_argument("--capture", type=Path)
     apply_update.add_argument("--p99-reference", type=Path)
     apply_update.add_argument("--confirm", action="store_true", help="Confirm installation of the reviewed candidate")
     apply_update.add_argument("--approve-quarantine", action="store_true", help="Apply a quarantined candidate after manual review")
@@ -149,18 +142,6 @@ def main(argv: list[str] | None = None) -> int:
                 "ambiguous": report.ambiguous,
             }, indent=2))
             return 0
-        if arguments.command == "import-capture":
-            bundle = import_capture(arguments.saved_variables, realm_name=arguments.realm)
-            issues = validate_bundle(bundle)
-            errors = [issue for issue in issues if issue.level == "error"]
-            if errors:
-                raise ValueError("Capture conversion failed validation: " + "; ".join(str(issue) for issue in errors[:5]))
-            bundle.write(arguments.output)
-            print(
-                f"Imported {len(bundle.entities)} entities and {len(bundle.edges)} relationships "
-                f"to {arguments.output}"
-            )
-            return 0
         if arguments.command == "install":
             result = install_addons(arguments.source, arguments.wow)
             print(result.message)
@@ -213,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
             with EqwowCache(arguments.cache) as cache:
                 message, bundle = apply_candidate_update(
                     cache, arguments.portable_output, arguments.compiled_output, arguments.wow,
-                    capture_file=arguments.capture, p99_reference=arguments.p99_reference,
+                    p99_reference=arguments.p99_reference,
                     force_reviewed=arguments.approve_quarantine,
                 )
             print(f"{message} Active graph: {len(bundle.entities):,} entities, {len(bundle.edges):,} relationships.")

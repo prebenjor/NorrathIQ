@@ -11,7 +11,7 @@ REALM_FIELDS = {
     "realmId", "clientId", "questId", "nativeMap", "wowStats", "slot",
     "classMask", "skillId", "icon", "vendorValue", "equippable",
     "weaponDamageMin", "weaponDamageMax", "weaponSpeed",
-    "map", "objectives", "observationContexts", "difficulty",
+    "map", "objectives", "difficulty",
     "game", "system", "rank", "spellBookTab", "passive", "powerCost",
     "powerType", "castTime", "minRange", "maxRange", "knownBy",
     "description", "tooltipText", "cooldownText", "castTimeText", "namespace",
@@ -86,7 +86,7 @@ def merge_realm(base: KnowledgeBundle, realm: KnowledgeBundle) -> tuple[Knowledg
             }
             field_origins = target.setdefault("fieldOrigins", {})
             for field_name in override:
-                field_origins[field_name] = "game-capture"
+                field_origins[field_name] = "realm-export"
             report.matched.append((realm_id, target_id))
             id_map[realm_id] = target_id
         elif len(candidates) > 1:
@@ -95,7 +95,7 @@ def merge_realm(base: KnowledgeBundle, realm: KnowledgeBundle) -> tuple[Knowledg
             report.unmatched.append(realm_id)
             target_id = realm_id
             if target_id in result.entities:
-                target_id = f"realm-observed:{realm_id}"
+                target_id = f"realm-unmapped:{realm_id}"
             result.entities[target_id] = deepcopy(realm_entity)
             result.entities[target_id]["id"] = target_id
             result.entities[target_id]["realmMapped"] = True
@@ -127,17 +127,16 @@ def merge_realm(base: KnowledgeBundle, realm: KnowledgeBundle) -> tuple[Knowledg
             result.maps["zones"].setdefault(zone, details)
     result.manifest["realmSource"] = realm.manifest.get("source")
     result.manifest["realmVersion"] = realm.manifest.get("version")
-    result.manifest["captureTimestamp"] = realm.manifest.get("captureTimestamp", realm.manifest.get("generatedAt", ""))
     snapshots = result.manifest.setdefault("sourceSnapshots", [])
-    snapshots[:] = [entry for entry in snapshots if entry.get("sourceId") != "game-capture"]
+    snapshots[:] = [entry for entry in snapshots if entry.get("sourceId") != "realm-export"]
     if realm.manifest.get("source"):
         snapshots.append({
-            "sourceId": "game-capture",
+            "sourceId": "realm-export",
             "name": realm.manifest.get("source"),
             "generatedAt": realm.manifest.get("generatedAt", ""),
             "realm": realm.manifest.get("realm", ""),
             "entityCounts": {"total": len(realm.entities)},
             "completeness": 1.0,
-            "warnings": [realm.manifest.get("disclaimer", "Client observations are local samples.")],
+            "warnings": [realm.manifest.get("disclaimer", "Realm exports may be incomplete.")],
         })
     return result, report

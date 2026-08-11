@@ -316,7 +316,7 @@ function UI:CreateFrame()
 
     local footer = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     footer:SetPoint("BOTTOMLEFT", 22, 18)
-    footer:SetText("Offline journal - EQWOW primary + captured realm overlay - never auto-sells or destroys")
+    footer:SetText("Offline journal - EQWOW Database - never auto-sells or destroys")
     self.frame = frame
 end
 
@@ -356,7 +356,7 @@ end
 function UI:CopySourceURL()
     local url = self.current and self.current.source and self.current.source.url
     if not url or not string.find(url, "^https?://") then
-        NIQ:Print("This record is a local client observation and has no external database page.")
+        NIQ:Print("This record has no external database page.")
         return
     end
     if ChatFrame_OpenChat then
@@ -517,7 +517,7 @@ function UI:ShowEntity(entity)
     end
     if entity.source then
         table.insert(lines, "")
-        table.insert(lines, "|cff6b5030Source: " .. (entity.source.name or entity.source.sourceId or "local observation") .. "|r")
+        table.insert(lines, "|cff6b5030Source: " .. (entity.source.name or entity.source.sourceId or "unknown source") .. "|r")
         append(lines, "Source record ID", entity.source.recordId)
         append(lines, "Snapshot", entity.source.snapshotDate or entity.source.snapshotId)
         table.insert(lines, "|cff6b5030Confidence: " .. (entity.source.confidence or "unknown") .. (entity.source.transport == "unverified-http" and " - unverified HTTP" or "") .. "|r")

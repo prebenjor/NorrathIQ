@@ -129,8 +129,6 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
                 "minLevel": edge.get("minLevel"),
                 "maxLevel": edge.get("maxLevel"),
                 "marker": spawn.get("id"),
-                "observedCount": edge.get("observedCount"),
-                "observedWindows": edge.get("observedWindows"),
             })
         else:
             source.setdefault(key, []).append(edge.get("to"))
@@ -160,7 +158,7 @@ def bundle_to_pack(bundle: KnowledgeBundle) -> dict[str, Any]:
             "sourceSnapshots": bundle.manifest.get("sourceSnapshots", []),
             "eqwowSnapshot": bundle.manifest.get("eqwowSnapshot", ""),
             "eqwowSnapshotDate": bundle.manifest.get("eqwowSnapshotDate", ""),
-            "captureTimestamp": bundle.manifest.get("captureTimestamp", bundle.manifest.get("realmVersion", "")),
+            "realmVersion": bundle.manifest.get("realmVersion", ""),
             "p99ReferenceVersion": bundle.manifest.get("p99ReferenceVersion", ""),
         },
         "entities": entities,

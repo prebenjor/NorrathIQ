@@ -9,7 +9,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -687,7 +686,7 @@ class EqwowSource:
             if limit is not None and completed >= limit:
                 break
             if progress:
-                progress(f"Downloading unlisted captured {kind} {record_id} by exact ID...")
+                progress(f"Downloading unlisted {kind} {record_id} by exact ID...")
             text, _ = self.client.get(source_url(kind, record_id))
             detail = parse_detail_page(kind, record_id, text)
             self.cache.put_indexes(snapshot, kind, [{"kind": kind, "id": int(record_id), "name": detail["name"], "fields": {"id": int(record_id), "unlisted": True}}])
@@ -708,91 +707,6 @@ class EqwowSource:
             completed += 1
         remaining = self.cache.pending_count(snapshot)
         return completed, remaining
-
-    def crawl_targets(
-        self,
-        targets: Iterable[tuple[str, int]],
-        *,
-        snapshot_id: str | None = None,
-        include_source_npcs: bool = True,
-        max_records: int = 120,
-        progress: Callable[[str], None] | None = None,
-        should_pause: Callable[[], bool] | None = None,
-    ) -> tuple[int, int]:
-        """Download a bounded set of useful details without entering the full crawl.
-
-        Captured items and quests are followed to their direct source NPCs so drop
-        zones and map coordinates become available. Already verified records cost no
-        request and are still inspected for their source links.
-        """
-        snapshot = snapshot_id or self.cache.get_meta("candidate_snapshot") or self.cache.get_meta("active_snapshot")
-        if not snapshot:
-            raise ValueError("No EQWOW index exists. Run Check now first.")
-        limit = max(1, int(max_records))
-        queue = deque()
-        queued: set[tuple[str, int]] = set()
-        for raw_kind, raw_id in targets:
-            kind, record_id = str(raw_kind), int(raw_id)
-            if kind not in KINDS:
-                continue
-            key = (kind, record_id)
-            if key not in queued:
-                queued.add(key)
-                queue.append(key)
-
-        downloaded = processed = 0
-        while queue and processed < limit:
-            if should_pause and should_pause():
-                break
-            kind, record_id = queue.popleft()
-            row = self.cache.db.execute(
-                "SELECT * FROM records WHERE snapshot_id=? AND kind=? AND record_id=?",
-                (snapshot, kind, record_id),
-            ).fetchone()
-            detail = json.loads(row["detail_json"]) if row and row["detail_verified"] and row["detail_json"] else None
-            if detail is None:
-                label = row["name"] if row else f"unlisted {kind}"
-                if progress:
-                    progress(f"Downloading useful {kind} {record_id}: {label}")
-                text, _ = self.client.get(source_url(kind, record_id))
-                detail = parse_detail_page(kind, record_id, text)
-                if row is None:
-                    self.cache.put_indexes(snapshot, kind, [{
-                        "kind": kind, "id": record_id, "name": detail["name"],
-                        "fields": {"id": record_id, "unlisted": True},
-                    }])
-                self.cache.put_detail(snapshot, detail)
-                downloaded += 1
-            processed += 1
-
-            if not include_source_npcs:
-                continue
-            related: list[tuple[str, int]] = []
-            for view in detail.get("listviews", []):
-                view_id = str(view.get("id", "")).casefold()
-                template = str(view.get("template", "")).casefold()
-                source_view = (
-                    kind == "item" and template == "npc" and any(word in view_id for word in ("drop", "sold", "vendor", "merchant"))
-                ) or (
-                    kind == "quest" and template == "npc" and any(word in view_id for word in ("start", "giver", "end", "turn"))
-                )
-                if not source_view:
-                    continue
-                for raw in view.get("data", []):
-                    if not isinstance(raw, dict):
-                        continue
-                    try:
-                        related.append(("npc", int(raw["id"])))
-                    except (KeyError, TypeError, ValueError):
-                        continue
-            # Follow each root immediately instead of letting a large spellbook or
-            # inventory push its map sources beyond the bounded request budget.
-            for key in reversed(related):
-                if key not in queued:
-                    queued.add(key)
-                    queue.appendleft(key)
-        return downloaded, processed
-
 
 def _entity_id(kind: str, record_id: int) -> str:
     return f"eqwow:{kind}:{int(record_id)}"
@@ -821,7 +735,7 @@ def _reference(kind: str, raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
     return _entity_id(kind, record_id), {"id": _entity_id(kind, record_id), "type": kind, "name": name, "realmId": record_id, "clientId": record_id}
 
 
-def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.3") -> KnowledgeBundle:
+def build_bundle_from_cache(cache: EqwowCache, snapshot_id: str | None = None, *, version: str = "1.3.4") -> KnowledgeBundle:
     snapshot = snapshot_id or cache.get_meta("candidate_snapshot") or cache.get_meta("active_snapshot")
     if not snapshot:
         raise ValueError("No EQWOW snapshot is available.")
@@ -1201,7 +1115,7 @@ def review_text(diff: SourceDiff, limit: int = 200) -> str:
 
 
 def merge_p99_fallback(primary: KnowledgeBundle, reference: KnowledgeBundle) -> KnowledgeBundle:
-    """Copy only absent descriptive prose; never replace EQWOW or captured fields."""
+    """Copy only absent descriptive prose; never replace EQWOW fields."""
     from copy import deepcopy
     from .normalize import normalize_name
 
@@ -1231,15 +1145,11 @@ def apply_candidate_update(
     compiled_output: str | Path,
     wow_or_addons: str | Path,
     *,
-    capture_file: str | Path | None = None,
     p99_reference: str | Path | None = None,
     force_reviewed: bool = False,
 ) -> tuple[str, KnowledgeBundle]:
-    from .capture import import_capture
-    from .auto_update import choose_realm
     from .compiler import compile_bundle
     from .installer import install_addons
-    from .realm import merge_realm
     from .validate import validate_bundle
 
     snapshot = cache.get_meta("candidate_snapshot")
@@ -1251,10 +1161,6 @@ def apply_candidate_update(
     bundle = build_bundle_from_cache(cache, snapshot)
     if p99_reference and (Path(p99_reference) / "manifest.json").is_file():
         bundle = merge_p99_fallback(bundle, KnowledgeBundle.load(p99_reference))
-    if capture_file and Path(capture_file).is_file():
-        captured = import_capture(capture_file, realm_name=choose_realm(capture_file))
-        bundle, _ = merge_realm(bundle, captured)
-        bundle.manifest["captureTimestamp"] = captured.manifest.get("generatedAt", "")
     errors = [issue for issue in validate_bundle(bundle) if issue.level == "error"]
     if errors:
         raise ValueError("Candidate validation failed: " + "; ".join(str(issue) for issue in errors[:10]))

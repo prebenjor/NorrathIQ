@@ -9,14 +9,12 @@ Run these checks on the target custom realm before publishing a release. Automat
 3. Run /reload and confirm account settings and per-character settings persist.
 4. Search before hovering an item; confirm only the Index pack and the selected detail shard load.
 
-## Realm capture
+## No gameplay observation
 
-1. Confirm capture reports OFF on a clean install and that ordinary play creates no realm records until `/niq capture on`.
-2. Enable capture, target and kill an NPC, loot an item, inspect a quest giver/turn-in, open bags/equipment/bank/merchant, open a tradeskill, and open the spellbook.
-3. Confirm `/niq capture status` counts the observations, then `/reload` and inspect `WTF\Account\<ACCOUNT>\SavedVariables\NorrathIQ.lua`.
-4. Import and merge the file in the updater. Validate that client IDs, quest objectives, recipe components, loot counts, map ID, normalized coordinates, sample count, and provenance survive compilation.
-5. Install the data-only compile and verify existing curated packs remain installed.
-6. Verify `/niq capture off` stops changes and `/niq capture clear confirm` removes only the current realm's capture.
+1. Hover items, target NPCs, accept quests, loot, trade, and open the spellbook.
+2. Confirm no capture chat messages appear and no `NorrathIQCaptureDB` is written.
+3. Confirm only NorrathIQ UI settings persist after `/reload`.
+4. Confirm tooltips never trigger data-pack loading or database indexing.
 
 ## Search and tooltips
 

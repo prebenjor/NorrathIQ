@@ -68,11 +68,8 @@ function Tooltip:Decorate(tooltip)
         tooltip._niqDecorating = nil
         return
     end
-    if NIQ.Capture then
-        NIQ.Capture:ObserveItem(link, "tooltip")
-    end
     -- Tooltip hovers must never load or queue an offline data shard. They use
-    -- the captured overlay and any knowledge already resident in memory.
+    -- only knowledge already resident in memory.
     local entity, status = NIQ.Data:ResolveExact(name, false, false)
     if status == "ambiguous" then
         tooltip:AddLine(" ")
@@ -100,11 +97,7 @@ function Tooltip:Decorate(tooltip)
             end
         end
         local level = levelText and " (level " .. levelText .. ")" or ""
-        local observed = ""
-        if drop.observedCount and drop.observedWindows and drop.observedWindows > 0 then
-            observed = string.format(" — observed %d/%d loot windows", drop.observedCount, drop.observedWindows)
-        end
-        return drop.npc .. level .. " — " .. (drop.zone or "unknown zone") .. observed
+        return drop.npc .. level .. " — " .. (drop.zone or "unknown zone")
     end)
     addList(tooltip, "Known source zones", entity.sourceZones, function(zone) return tostring(zone) end)
     addList(tooltip, "Related", NIQ.Data:GetRelations(entity, false), function(related)
@@ -120,7 +113,7 @@ function Tooltip:Decorate(tooltip)
         tooltip:AddLine(comparison.details, 0.72, 0.72, 0.72, true)
     end
     if NIQ.db.showConfidence and entity.source then
-        local label = entity.source.name or entity.source.sourceId or "local capture"
+        local label = entity.source.name or entity.source.sourceId or "unknown source"
         local record = entity.source.recordId and " #" .. tostring(entity.source.recordId) or ""
         local snapshot = entity.source.snapshotDate and " - " .. tostring(entity.source.snapshotDate) or ""
         tooltip:AddLine("Source: " .. label .. record .. snapshot, 0.55, 0.65, 0.65)
